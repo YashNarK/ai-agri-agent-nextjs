@@ -1,10 +1,7 @@
 // ============================================================
-// app/api/crops/route.ts
-// GET /api/crops — the complete crop catalog, ordered by name
-//
-// Each crop includes its unique `code`, the value used as a path
-// parameter across the rest of the API. Call this first to discover
-// valid crop_code values before hitting price, prediction or search.
+// app/api/crops/[crop_code]/route.ts
+// GET /api/crops/{crop_code} — a single crop by its unique,
+// case-sensitive code (e.g. MAIZE, WHEAT-W, SOY). 404 if unknown.
 //
 // Port of routers/crops.py
 // ============================================================
@@ -16,9 +13,13 @@ import { toErrorResponse } from "@/lib/errors";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ crop_code: string }> },
+) {
   try {
-    return NextResponse.json(await cropsService.listCrops());
+    const { crop_code } = await params;
+    return NextResponse.json(await cropsService.getCropByCode(crop_code));
   } catch (error) {
     return toErrorResponse(error);
   }
