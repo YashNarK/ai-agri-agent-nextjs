@@ -2,7 +2,7 @@
 
 Price prediction, semantic search and an AI chat agent over agricultural
 commodity data. A TypeScript port of the production FastAPI service
-`py-syngeta-ag-prodgrade-practice`, pointing at the **same** Neon Postgres
+[`agri-ai-platform`](https://github.com/YashNarK/agri-ai-platform), pointing at the **same** Neon Postgres
 database, the same AWS Secrets Manager / SSM parameters, and the same Azure ML
 scoring endpoint.
 
@@ -67,10 +67,27 @@ resolves at runtime:
 - **SSM Parameter Store** — `/prod/agri/{embed,chat}-model-name`,
   `/prod/agri/{embed,chat}-api-version`, `/prod/agri/db-schema`
 
-`DATABASE_URL` is optional at runtime (it short-circuits the AWS lookup) but
-**required** for the Prisma CLI, which cannot call AWS.
-
 On AWS compute, drop the keys and use an IAM role.
+
+### Pooled vs direct connections
+
+Neon exposes two endpoints and they are **not** interchangeable. The DB secret
+carries both (`database_url`, `direct_database_url`), and each is used for
+exactly one job:
+
+| Endpoint | Host | Used by | Why |
+| --- | --- | --- | --- |
+| Pooled | `ep-*-pooler.…` | the app (`lib/prisma.ts`) | PgBouncer in transaction mode suits many short request-scoped connections |
+| Direct | `ep-*.…` | Prisma CLI (`prisma.config.ts`), `scripts/sql-runner.ts` | DDL takes session advisory locks and runs multi-statement scripts, neither of which survives transaction pooling |
+
+Note this is *not* the `url` + `directUrl` datasource pair from older Prisma.
+With driver adapters the schema's datasource block carries no URL at all: the
+adapter supplies the runtime connection and `prisma.config.ts` supplies the
+CLI's. `prisma.config.ts` therefore reads `DIRECT_URL`.
+
+`DATABASE_URL` / `DIRECT_URL` are optional at runtime (they short-circuit the
+AWS lookup) but **required** for the Prisma CLI, which cannot call AWS. Secrets
+that predate the split still work — a single URL is used for both roles.
 
 ## Running
 
