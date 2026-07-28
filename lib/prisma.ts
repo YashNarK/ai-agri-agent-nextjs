@@ -37,6 +37,10 @@ const globalForPrisma = globalThis as typeof globalThis & {
 async function createPrismaClient(): Promise<PrismaClient> {
   const database = await loadDatabaseConfig();
 
+  // Application traffic goes to the POOLED endpoint. Neon's pooler is
+  // PgBouncer in transaction mode, which suits many short-lived CRUD
+  // connections — exactly what serverless request handlers produce.
+  // DDL must not come through here; see scripts/sql-runner.ts.
   const adapter = new PrismaNeon({ connectionString: database.url });
 
   const options: PrismaClientOptions = {

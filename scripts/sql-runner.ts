@@ -29,13 +29,20 @@ import "dotenv/config";
 import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 
-import { Client } from "@neondatabase/serverless";
+import { Client, neonConfig } from "@neondatabase/serverless";
+import ws from "ws";
 
 import { loadDatabaseConfig } from "../lib/aws/app-config";
 
+neonConfig.webSocketConstructor = ws as unknown as typeof WebSocket;
+
 async function connect(): Promise<Client> {
-  const { url } = await loadDatabaseConfig();
-  const client = new Client(url);
+  // DDL goes to the DIRECT endpoint, never the pooler. These scripts run
+  // many statements per connection and create extensions, partitions and
+  // indexes — work that needs session state and advisory locks, neither of
+  // which survives PgBouncer's transaction-mode pooling.
+  const { directUrl } = await loadDatabaseConfig();
+  const client = new Client(directUrl);
   await client.connect();
   return client;
 }

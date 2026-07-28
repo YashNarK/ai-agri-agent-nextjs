@@ -41,6 +41,10 @@ interface DBSecret {
   password: string;
   dbname: string;
   port?: string;
+  /** Pooled (PgBouncer) connection string — preferred for app traffic. */
+  database_url?: string;
+  /** Direct, non-pooled connection string — required for DDL and migrations. */
+  direct_database_url?: string;
 }
 
 interface OpenAISecret {
@@ -66,8 +70,21 @@ export interface DatabaseConfig {
   password: string;
   database: string;
   port: string;
-  /** full libpq connection URL consumed by the Prisma/Neon adapter */
+  /**
+   * Pooled connection URL — what the Prisma/Neon adapter uses for all
+   * application traffic. Neon's pooler is PgBouncer in transaction mode,
+   * which is ideal for many short CRUD connections.
+   */
   url: string;
+  /**
+   * Direct, non-pooled connection URL.
+   *
+   * DDL belongs here, not on the pooled endpoint: migrations take session
+   * advisory locks and run multi-statement scripts, neither of which
+   * survives transaction-mode pooling. Falls back to `url` when the secret
+   * predates the split, so this is always safe to read.
+   */
+  directUrl: string;
 }
 
 export interface AzureOpenAIConfig {
@@ -162,35 +179,45 @@ function logSecretStatus(name: string, secret: Record<string, unknown>): void {
 // Public loaders
 // ============================================================
 
+/** Splits a connection URL back into its parts for the DatabaseConfig fields. */
+function describeUrl(url: string) {
+  const parsed = new URL(url);
+  return {
+    host: parsed.hostname,
+    user: decodeURIComponent(parsed.username),
+    password: decodeURIComponent(parsed.password),
+    database: parsed.pathname.replace(/^\//, ""),
+    port: parsed.port || "5432",
+  };
+}
+
 /**
  * Fetches ONLY the database secret and builds a DatabaseConfig.
  * Used by schema-setup tooling so creating the DB/schema does not
  * require the Azure secrets to exist.
  *
- * DATABASE_URL, when set, short-circuits AWS entirely — matching
- * core/sql_runner.py's resolution order and keeping `prisma
- * migrate`/`prisma db pull` workable locally.
+ * Resolution order, highest priority first:
+ *   1. $DATABASE_URL / $DIRECT_URL      (local dev, and the Prisma CLI)
+ *   2. secret.database_url / .direct_database_url
+ *   3. a URL composed from host/username/password/dbname/port
+ *
+ * Step 3 keeps older secrets — which carried only the discrete fields —
+ * working unchanged. When only one URL is available, both `url` and
+ * `directUrl` point at it, so callers never have to null-check.
  */
 export async function loadDatabaseConfig(): Promise<DatabaseConfig> {
   const envUrl = process.env.DATABASE_URL?.trim();
+  const envDirectUrl = process.env.DIRECT_URL?.trim();
+
   if (envUrl) {
-    const parsed = new URL(envUrl);
     return {
-      host: parsed.hostname,
-      user: decodeURIComponent(parsed.username),
-      password: decodeURIComponent(parsed.password),
-      database: parsed.pathname.replace(/^\//, ""),
-      port: parsed.port || "5432",
+      ...describeUrl(envUrl),
       url: envUrl,
+      directUrl: envDirectUrl || envUrl,
     };
   }
 
   const secret = await getSecret<DBSecret>(settings.DB_SECRET_NAME);
-  const host = secret.host;
-  const user = secret.username;
-  const password = secret.password;
-  const database = secret.dbname;
-  const port = secret.port ?? "5432";
 
   // Credentials are percent-encoded on the way into the URL — the Python
   // app did the same via scripts/url_parse.url_to_str (quote_plus), so a
@@ -198,11 +225,17 @@ export async function loadDatabaseConfig(): Promise<DatabaseConfig> {
   //
   // asyncpg took SSL via connect_args; the Neon driver takes it on the URL.
   const sslmode = settings.DB_SSL ? "require" : "prefer";
-  const url =
-    `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}` +
-    `@${host}:${port}/${database}?sslmode=${sslmode}`;
+  const composed =
+    `postgresql://${encodeURIComponent(secret.username)}:${encodeURIComponent(secret.password)}` +
+    `@${secret.host}:${secret.port ?? "5432"}/${secret.dbname}?sslmode=${sslmode}`;
 
-  return { host, user, password, database, port, url };
+  // Prefer the ready-made URLs when the secret carries them: they encode
+  // the pooled-vs-direct hostname distinction, which cannot be derived
+  // from the discrete `host` field alone.
+  const url = secret.database_url?.trim() || composed;
+  const directUrl = secret.direct_database_url?.trim() || url;
+
+  return { ...describeUrl(url), url, directUrl };
 }
 
 let _appConfig: Promise<AppConfig> | undefined;
