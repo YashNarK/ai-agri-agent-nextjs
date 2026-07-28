@@ -1,36 +1,137 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Agricultural Intelligence Platform — Next.js
 
-## Getting Started
+Price prediction, semantic search and an AI chat agent over agricultural
+commodity data. A TypeScript port of the production FastAPI service
+`py-syngeta-ag-prodgrade-practice`, pointing at the **same** Neon Postgres
+database, the same AWS Secrets Manager / SSM parameters, and the same Azure ML
+scoring endpoint.
 
-First, run the development server:
+## Stack mapping
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+| Python service            | This service                          |
+| ------------------------- | ------------------------------------- |
+| FastAPI routers           | Next.js App Router `app/api/**/route.ts` |
+| SQLAlchemy async ORM      | Prisma 7 + `@prisma/adapter-neon`     |
+| Pydantic schemas          | zod (requests) + TS interfaces (responses) |
+| `HTTPException`           | `ApiError` + `toErrorResponse`        |
+| `Depends()` DI            | `lib/container.ts` composition root   |
+| lifespan startup          | memoised lazy loaders                 |
+| FastMCP (`/mcp`)          | `mcp-handler` (`/api/mcp/[transport]`) |
+| LangGraph (Python)        | LangGraph JS                          |
+| `sse-starlette`           | `ReadableStream` + SSE headers        |
+| Neon Postgres             | Neon Postgres (unchanged)             |
+| Secrets Manager + SSM     | Secrets Manager + SSM (unchanged)     |
+
+## Architecture
+
+```
+app/api/**/route.ts     HTTP layer — parse, delegate, map errors
+services/               business logic (framework-free)
+repositories/           data access (Prisma / raw SQL)
+agents/                 LangGraph ReAct agent: state, tools, nodes, graph
+lib/                    config, AWS, Prisma client, errors, schemas, container
+sql/                    DDL that predates Prisma (extensions, partitions, ivfflat)
+scripts/                sql-runner, embedding backfill
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Why there is no lifespan
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+FastAPI resolved config, the DB engine and the compiled agent graph once at
+startup and hung them on `app.state`. Route handlers have no equivalent hook, so
+each of those is a **memoised promise** resolved on first use and reused for the
+process lifetime:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `loadAppConfig()` — `lib/aws/app-config.ts`
+- `getPrisma()` — `lib/prisma.ts`
+- `getAgentGraph()` — `agents/graph.ts`
 
-## Learn More
+A rejected load is never cached, so a transient AWS blip does not poison the
+process.
 
-To learn more about Next.js, take a look at the following resources:
+### pgvector and Prisma
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+`agronomic_knowledge.embedding` is `Unsupported("vector")` — Prisma cannot read,
+write or filter it. All similarity search therefore goes through
+`$queryRawUnsafe` with bound parameters and the `<=>` cosine-distance operator
+(`repositories/knowledge.repository.ts`), and the embedding backfill writes via
+`$executeRawUnsafe`. This mirrors the Python app, which used raw SQL through
+SQLAlchemy for the same reason.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Configuration
 
-## Deploy on Vercel
+Only AWS credentials belong in `.env` — see `.env.example`. Everything else
+resolves at runtime:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **Secrets Manager** — `prod/agri/database`, `prod/agri/azure-openai`,
+  `prod/agri/azure-ml`
+- **SSM Parameter Store** — `/prod/agri/{embed,chat}-model-name`,
+  `/prod/agri/{embed,chat}-api-version`, `/prod/agri/db-schema`
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+`DATABASE_URL` is optional at runtime (it short-circuits the AWS lookup) but
+**required** for the Prisma CLI, which cannot call AWS.
+
+On AWS compute, drop the keys and use an IAM role.
+
+## Running
+
+```bash
+npm install
+npm run dev            # http://localhost:3000
+npm run build
+npm run typecheck
+```
+
+Schema and data tooling:
+
+```bash
+npm run db:schema        # apply sql/01..08 in order
+npm run db:pull          # re-introspect Neon into prisma/schema.prisma
+npm run seed:embeddings  # backfill agronomic_knowledge.embedding (idempotent)
+```
+
+## API
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/api` | service index |
+| GET | `/api/crops` | full catalog, ordered by name |
+| GET | `/api/crops/{crop_code}` | 404 if unknown |
+| GET | `/api/regions` | ordered by name |
+| GET | `/api/regions/{region_code}` | 404 if unknown |
+| GET | `/api/prices/{crop_code}/{region_code}` | `date_from`, `date_to`, `limit` (1–500) |
+| POST | `/api/predictions` | 201; 404 / 422 / 502 on failure |
+| POST | `/api/search` | pgvector semantic search |
+| POST | `/api/chat` | full answer, all tool calls collected |
+| POST | `/api/chatstream` | SSE: `token` · `tool` · `notice` · `error` · `done` |
+| GET | `/api/chat/sessions/{session_id}` | 404 if unknown |
+| DELETE | `/api/chat/sessions/{session_id}` | idempotent — 200 even if already gone |
+| ALL | `/api/mcp/mcp` | MCP streamable HTTP (`/api/mcp/sse` for SSE) |
+
+Errors use the Python service's shape: `{"detail": "..."}`.
+
+## The agent
+
+`llm → (tools → llm)* → END`, compiled with a `MemorySaver` checkpointer keyed by
+`thread_id` = session id. Two guardrails carried over verbatim:
+
+- **Tool-call budget** (`MAX_AGENT_TOOL_CALLS = 8`) — on exhaustion the final LLM
+  hop runs with tools *unbound*, so the loop provably terminates.
+- **`repairToolCalls`** — DeepSeek-V3.2 on Azure emits tool-call arguments with
+  trailing junk (`{"crop_code":"MAIZE"}""`). Strict `JSON.parse` throws, LangChain
+  files it under `invalid_tool_calls`, and the ReAct loop stalls. We scan for the
+  first balanced JSON object and promote the call back to a real one.
+
+`MemorySaver` is in-process: conversation memory resets on restart and is not
+shared across instances, matching the Python app. Swap in a Postgres
+checkpointer if you need durability across deploys.
+
+## Not ported
+
+These stay in the Python repo — they are offline ML tooling, not app logic:
+
+- `scripts/train_price_model.py` — scikit-learn / MLflow training. The trained
+  model is already deployed to the Azure ML endpoint this service calls.
+- `scripts/generate_data.py`, `seed_demo_data.py`, `load_us_south_prices.py` —
+  one-off data generation against a database that is already populated.
+- `mlflow-price-model/`, `azureml/` — model artifacts and deployment YAML.
+- `Dockerfile` — no containerization by design.
