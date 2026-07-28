@@ -1,6 +1,5 @@
-import { CropsService } from "@/services/crops.service";
+import { cropsService } from "@/lib/container";
 import { NextResponse } from "next/server";
-const cropsService = new CropsService();
 
 export async function GET(request: Request) {
   try {

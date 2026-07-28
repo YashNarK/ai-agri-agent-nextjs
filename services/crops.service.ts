@@ -1,7 +1,7 @@
 import { CropsRepository } from "@/repositories/crop.repositories";
 
 export class CropsService {
-  constructor(private readonly cropsRepo = new CropsRepository()) {}
+  constructor(private readonly cropsRepo: CropsRepository) {}
 
   async getAllCrops(limit: number = 10) {
     return this.cropsRepo.findAll(limit);
