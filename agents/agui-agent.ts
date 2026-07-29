@@ -57,7 +57,7 @@ import { asToolArtifact, type ToolArtifact } from "@/agents/artifacts";
 import { getAgentGraph } from "@/agents/graph";
 import { MAX_AGENT_TOOL_CALLS, RECURSION_LIMIT } from "@/agents/nodes";
 import { chatService } from "@/lib/container";
-import { chunkText } from "@/services/chat.service";
+import { BUDGET_FALLBACK, chunkText } from "@/services/chat.service";
 
 /**
  * Agent state mirrored to the client.
@@ -387,7 +387,30 @@ export class AgriculturalAgent extends AbstractAgent {
     closeText();
 
     // last non-empty segment, matching extractFinalAiMessage()
-    const answer = [...segments].reverse().find((s) => s.trim() !== "") ?? "";
+    let answer = [...segments].reverse().find((s) => s.trim() !== "") ?? "";
+
+    // A run that streams no text at all must not finish as silence. The
+    // model can return empty content — most easily when it has been told
+    // its tool budget is gone and it has nothing left to say — and
+    // without this the turn ends with RUN_FINISHED and zero messages,
+    // which renders as the assistant simply ignoring the question. The
+    // REST route has always substituted BUDGET_FALLBACK here; this makes
+    // the streaming path behave the same way rather than silently.
+    if (answer === "" && !signal.aborted) {
+      answer = BUDGET_FALLBACK;
+      const messageId = `${runId}-msg-fallback`;
+      emit({
+        type: EventType.TEXT_MESSAGE_START,
+        messageId,
+        role: "assistant",
+      });
+      emit({
+        type: EventType.TEXT_MESSAGE_CONTENT,
+        messageId,
+        delta: answer,
+      });
+      emit({ type: EventType.TEXT_MESSAGE_END, messageId });
+    }
 
     if (answer !== "" && !signal.aborted) {
       await chatService.persistStreamedTurn(

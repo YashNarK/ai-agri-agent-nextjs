@@ -238,12 +238,37 @@ function toolCallsOf(message: BaseMessage) {
   return (message as AIMessage).tool_calls ?? [];
 }
 
-/** Total tool calls the agent has already made this turn. */
+/**
+ * Tool calls the agent has made SINCE THE CURRENT USER MESSAGE.
+ *
+ * The scope matters and used to be wrong. Counting the whole message
+ * list looks equivalent for a one-shot request and is not: the graph is
+ * checkpointed per thread, so `state.messages` keeps growing across
+ * turns. A first question that spent the full budget left the counter
+ * at the cap forever, and every later question in that conversation
+ * started already exhausted — the model was handed TOOL_BUDGET_NOTICE
+ * before it had done anything, so it answered follow-ups from stale
+ * data or, given nothing to say, said nothing at all.
+ *
+ * MAX_AGENT_TOOL_CALLS is a per-TURN allowance ("your entire tool-call
+ * budget for this turn", says the notice), so the count restarts at the
+ * last human message.
+ */
 function countToolCalls(messages: BaseMessage[]): number {
-  return messages.reduce(
-    (total, msg) => (isAiMessage(msg) ? total + toolCallsOf(msg).length : total),
-    0,
-  );
+  let start = 0;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i].getType() === "human") {
+      start = i;
+      break;
+    }
+  }
+
+  let total = 0;
+  for (let i = start; i < messages.length; i += 1) {
+    const msg = messages[i];
+    if (isAiMessage(msg)) total += toolCallsOf(msg).length;
+  }
+  return total;
 }
 
 /**
