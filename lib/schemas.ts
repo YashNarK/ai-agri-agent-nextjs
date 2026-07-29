@@ -223,6 +223,34 @@ export const predictionRequestSchema = z.object({
 
 export type PredictionRequest = z.infer<typeof predictionRequestSchema>;
 
+/** A logged forecast, joined with the codes needed to label it. */
+export interface LoggedPrediction {
+  id: number;
+  crop_code: string;
+  crop_name: string;
+  region_code: string;
+  region_name: string;
+  target_date: string;
+  prediction_date: string;
+  predicted_price: number;
+  confidence_low: number | null;
+  confidence_high: number | null;
+  model_version: string | null;
+  /** The exact feature row scored, for explainability. */
+  features_used: Record<string, number | string> | null;
+}
+
+export interface PredictionListResponse {
+  predictions: LoggedPrediction[];
+  total: number;
+}
+
+export const predictionListQuerySchema = z.object({
+  crop_code: z.string().optional(),
+  region_code: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
+});
+
 export interface PredictionResponse {
   id: number;
   crop_id: number;

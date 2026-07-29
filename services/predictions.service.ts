@@ -10,7 +10,11 @@
 import type { AppConfig } from "@/lib/aws/app-config";
 import { settings } from "@/lib/config/settings";
 import { ApiError, badGateway, unprocessable } from "@/lib/errors";
-import type { PredictionResponse } from "@/lib/schemas";
+import type {
+  LoggedPrediction,
+  PredictionListResponse,
+  PredictionResponse,
+} from "@/lib/schemas";
 import { toDateString, toNumber, toNumberOrNull } from "@/lib/serialize";
 import type { MarketIndicatorRepository } from "@/repositories/market-indicator.repository";
 import type { PredictionRepository } from "@/repositories/prediction.repository";
@@ -97,6 +101,56 @@ export class PredictionsService {
     private readonly cropsService: CropsService,
     private readonly regionsService: RegionsService,
   ) {}
+
+  /**
+   * Browses forecasts already logged, without calling Azure ML.
+   *
+   * Every prediction this service serves is persisted with the exact
+   * feature row that produced it, so the history is fully explainable
+   * after the fact — and reading it costs nothing.
+   */
+  async listPredictions({
+    cropCode,
+    regionCode,
+    limit,
+  }: {
+    cropCode?: string | null;
+    regionCode?: string | null;
+    limit?: number;
+  }): Promise<PredictionListResponse> {
+    const crop = cropCode
+      ? await this.cropsService.requireCropByCode(cropCode)
+      : null;
+    const region = regionCode
+      ? await this.regionsService.requireRegionByCode(regionCode)
+      : null;
+
+    const rows = await this.predictionRepo.list({
+      cropId: crop?.id ?? null,
+      regionId: region?.id ?? null,
+      limit,
+    });
+
+    const predictions: LoggedPrediction[] = rows.map((row) => ({
+      id: Number(row.id),
+      crop_code: row.crops.code,
+      crop_name: row.crops.name,
+      region_code: row.regions.code,
+      region_name: row.regions.name,
+      target_date: toDateString(row.target_date),
+      prediction_date: row.prediction_date.toISOString(),
+      predicted_price: toNumber(row.predicted_price),
+      confidence_low: toNumberOrNull(row.confidence_low),
+      confidence_high: toNumberOrNull(row.confidence_high),
+      model_version: row.model_version,
+      features_used: (row.features_used ?? null) as Record<
+        string,
+        number | string
+      > | null,
+    }));
+
+    return { predictions, total: predictions.length };
+  }
 
   /**
    * Latest value on/before targetDate for each macro indicator,

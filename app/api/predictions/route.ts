@@ -23,10 +23,49 @@ import { NextResponse } from "next/server";
 import { loadAppConfig } from "@/lib/aws/app-config";
 import { predictionsService } from "@/lib/container";
 import { ApiError, toErrorResponse } from "@/lib/errors";
-import { predictionRequestSchema } from "@/lib/schemas";
+import {
+  predictionListQuerySchema,
+  predictionRequestSchema,
+} from "@/lib/schemas";
 import { parseDateOnly } from "@/lib/serialize";
 
 export const runtime = "nodejs";
+
+/**
+ * GET /api/predictions — browse forecasts already logged.
+ *
+ * Read-only and free: POST is what calls the Azure ML endpoint and
+ * writes the row; this just reads what that produced, including the
+ * feature vector each forecast was scored on.
+ *
+ * Optional filters: crop_code, region_code, limit (1–500).
+ */
+export async function GET(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+
+    const parsed = predictionListQuerySchema.safeParse({
+      crop_code: searchParams.get("crop_code") ?? undefined,
+      region_code: searchParams.get("region_code") ?? undefined,
+      limit: searchParams.get("limit") ?? undefined,
+    });
+    if (!parsed.success) {
+      throw new ApiError(422, parsed.error.issues[0].message);
+    }
+
+    const { crop_code, region_code, limit } = parsed.data;
+
+    return NextResponse.json(
+      await predictionsService.listPredictions({
+        cropCode: crop_code,
+        regionCode: region_code,
+        limit,
+      }),
+    );
+  } catch (error) {
+    return toErrorResponse(error);
+  }
+}
 
 export async function POST(request: Request) {
   try {

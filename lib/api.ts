@@ -14,8 +14,10 @@
 import {
   cropsService,
   indicatorsService,
+  predictionsService,
   pricesService,
   regionsService,
+  searchService,
   weatherService,
   yieldsService,
 } from "@/lib/container";
@@ -54,4 +56,29 @@ export async function getWeather(regionCode: string, limit = 400) {
 
 export async function getYields(cropCode: string, regionCode?: string) {
   return yieldsService.getYields({ cropCode, regionCode: regionCode ?? null });
+}
+
+/** Reads already-logged forecasts. Does NOT call Azure ML. */
+export async function getLoggedPredictions(limit = 50) {
+  return predictionsService.listPredictions({ limit });
+}
+
+/**
+ * Semantic search. Unlike everything else here this DOES call out —
+ * Azure OpenAI, to embed the query — so it can fail independently of
+ * the database.
+ */
+export async function searchKnowledge(
+  query: string,
+  cropCode?: string | null,
+  topK = 5,
+) {
+  const { loadAppConfig } = await import("@/lib/aws/app-config");
+  const config = await loadAppConfig();
+  return searchService.semanticSearch({
+    query,
+    config: config.azureOpenAI,
+    cropCode,
+    topK,
+  });
 }
