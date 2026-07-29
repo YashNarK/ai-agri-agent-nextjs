@@ -88,6 +88,130 @@ export const priceHistoryQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(100),
 });
 
+/** The (crop, region) pairs that actually have price history. */
+export interface AvailablePair {
+  crop_code: string;
+  region_code: string;
+  months: number;
+  start_date: string;
+  end_date: string;
+}
+
+// ============================================================
+// WEATHER SCHEMAS
+// ============================================================
+export interface WeatherSchema {
+  id: number;
+  region_id: number;
+  weather_date: string;
+  temp_max_c: number | null;
+  temp_min_c: number | null;
+  temp_avg_c: number | null;
+  rainfall_mm: number | null;
+  humidity_pct: number | null;
+  wind_speed_kmh: number | null;
+  solar_radiation: number | null;
+  drought_index: number | null;
+}
+
+export interface WeatherResponse {
+  region: string;
+  region_code: string;
+  observations: WeatherSchema[];
+  total: number;
+}
+
+export const weatherQuerySchema = z.object({
+  date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  limit: z.coerce.number().int().min(1).max(2000).default(365),
+});
+
+// ============================================================
+// YIELD SCHEMAS
+// ============================================================
+export interface YieldSchema {
+  id: number;
+  crop_id: number;
+  region_id: number;
+  region_code: string;
+  region_name: string;
+  harvest_year: number;
+  yield_tonnes_ha: number;
+  area_harvested_ha: number | null;
+  total_production_tonnes: number | null;
+  quality_grade: string | null;
+}
+
+export interface YieldResponse {
+  crop: string;
+  crop_code: string;
+  yields: YieldSchema[];
+  total: number;
+}
+
+export const yieldQuerySchema = z.object({
+  region_code: z.string().optional(),
+  year_from: z.coerce.number().int().min(1900).max(2200).optional(),
+  year_to: z.coerce.number().int().min(1900).max(2200).optional(),
+});
+
+// ============================================================
+// MARKET INDICATOR SCHEMAS
+// ============================================================
+export interface IndicatorPoint {
+  indicator_date: string;
+  indicator_value: number;
+}
+
+/** One indicator as a plottable series, rather than a flat row list. */
+export interface IndicatorSeries {
+  indicator_name: string;
+  unit: string | null;
+  points: IndicatorPoint[];
+}
+
+export interface IndicatorResponse {
+  series: IndicatorSeries[];
+  total: number;
+}
+
+export const indicatorQuerySchema = z.object({
+  names: z.string().optional(),
+  date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  limit: z.coerce.number().int().min(1).max(5000).default(2000),
+});
+
+// ============================================================
+// PRODUCT SCHEMAS
+// ============================================================
+export interface ProductSchema {
+  id: number;
+  sku: string;
+  name: string;
+  category: string;
+  sub_category: string | null;
+  crop_id: number | null;
+  crop_code: string | null;
+  description: string | null;
+  active_ingredient: string | null;
+  unit_of_measure: string;
+}
+
+export interface ProductListResponse {
+  products: ProductSchema[];
+  categories: string[];
+  total: number;
+}
+
+export const productQuerySchema = z.object({
+  crop_code: z.string().optional(),
+  category: z.string().optional(),
+  search: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
+});
+
 // ============================================================
 // PREDICTION SCHEMAS
 // ============================================================

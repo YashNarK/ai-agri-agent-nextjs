@@ -18,13 +18,18 @@ import { PriceRepository } from "@/repositories/price.repository";
 import { ProductRepository } from "@/repositories/product.repository";
 import { RegionRepository } from "@/repositories/region.repository";
 import { WeatherRepository } from "@/repositories/weather.repository";
+import { YieldRepository } from "@/repositories/yield.repository";
 
 import { ChatService } from "@/services/chat.service";
 import { CropsService } from "@/services/crops.service";
+import { IndicatorsService } from "@/services/indicators.service";
 import { PredictionsService } from "@/services/predictions.service";
 import { PricesService } from "@/services/prices.service";
+import { ProductsService } from "@/services/products.service";
 import { RegionsService } from "@/services/regions.service";
 import { SearchService } from "@/services/search.service";
+import { WeatherService } from "@/services/weather.service";
+import { YieldsService } from "@/services/yields.service";
 
 // ── repositories ───────────────────────────────────────────────
 const cropRepo = new CropRepository();
@@ -35,6 +40,7 @@ const knowledgeRepo = new KnowledgeRepository();
 const marketIndicatorRepo = new MarketIndicatorRepository();
 const predictionRepo = new PredictionRepository();
 const weatherRepo = new WeatherRepository();
+const yieldRepo = new YieldRepository();
 const chatRepo = new ChatRepository();
 
 // ── services ───────────────────────────────────────────────────
@@ -50,6 +56,10 @@ const predictionsService = new PredictionsService(
   regionsService,
 );
 const chatService = new ChatService(chatRepo);
+const weatherService = new WeatherService(weatherRepo, regionsService);
+const yieldsService = new YieldsService(yieldRepo, cropsService, regionsService);
+const indicatorsService = new IndicatorsService(marketIndicatorRepo);
+const productsService = new ProductsService(productRepo, cropsService);
 
 export const container = {
   cropRepo,
@@ -60,6 +70,7 @@ export const container = {
   marketIndicatorRepo,
   predictionRepo,
   weatherRepo,
+  yieldRepo,
   chatRepo,
   cropsService,
   regionsService,
@@ -67,6 +78,10 @@ export const container = {
   searchService,
   predictionsService,
   chatService,
+  weatherService,
+  yieldsService,
+  indicatorsService,
+  productsService,
 };
 
 export type Container = typeof container;
@@ -78,4 +93,8 @@ export {
   searchService,
   predictionsService,
   chatService,
+  weatherService,
+  yieldsService,
+  indicatorsService,
+  productsService,
 };

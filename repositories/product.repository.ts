@@ -5,7 +5,50 @@
 
 import { getPrisma } from "@/lib/prisma";
 
+export interface ProductListFilter {
+  cropId?: number | null;
+  category?: string | null;
+  search?: string | null;
+  limit?: number;
+}
+
 export class ProductRepository {
+  /**
+   * Catalog listing with optional filters. `search` matches name, SKU or
+   * active ingredient — one box in the UI rather than three.
+   */
+  async list({ cropId, category, search, limit = 100 }: ProductListFilter) {
+    const prisma = await getPrisma();
+    return prisma.products.findMany({
+      where: {
+        ...(cropId ? { crop_id: cropId } : {}),
+        ...(category ? { category: { equals: category, mode: "insensitive" } } : {}),
+        ...(search
+          ? {
+              OR: [
+                { name: { contains: search, mode: "insensitive" } },
+                { sku: { contains: search, mode: "insensitive" } },
+                { active_ingredient: { contains: search, mode: "insensitive" } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: { name: "asc" },
+      take: limit,
+      include: { crops: { select: { code: true, name: true } } },
+    });
+  }
+
+  /** Distinct categories, for the filter dropdown. */
+  async listCategories() {
+    const prisma = await getPrisma();
+    return prisma.products.findMany({
+      distinct: ["category"],
+      select: { category: true },
+      orderBy: { category: "asc" },
+    });
+  }
+
   async findById(id: number) {
     const prisma = await getPrisma();
     return prisma.products.findUnique({ where: { id } });
