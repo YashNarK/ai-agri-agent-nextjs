@@ -52,15 +52,43 @@ const globalForGraph = globalThis as typeof globalThis & {
   __agentGraph?: Promise<CompiledAgentGraph>;
 };
 
+/**
+ * Module-scoped cache, used in development only.
+ *
+ * The globalThis cache below deliberately outlives module reloads, which
+ * is right in production and actively harmful in dev: Next hot-reloads
+ * this module on every edit, but a graph parked on globalThis survives,
+ * so the process keeps serving the PREVIOUSLY compiled nodes, tools and
+ * prompts. Edits to the agent then appear to do nothing — worse, they
+ * appear to do something inconsistent, because the stale graph answers
+ * while the source says otherwise. That cost a full round of prompt
+ * measurements here: the model quoted a string that had already been
+ * deleted from the source.
+ *
+ * A module-level binding is reset by HMR, which is exactly the wanted
+ * behaviour. The graph is rebuilt on the next request after an edit;
+ * loadAppConfig() is separately memoised, so no secret is re-fetched.
+ */
+let devGraph: Promise<CompiledAgentGraph> | undefined;
+
+const isDev = process.env.NODE_ENV !== "production";
+
 /** Returns the compiled graph, building it (and loading config) on first use. */
 export function getAgentGraph(): Promise<CompiledAgentGraph> {
-  globalForGraph.__agentGraph ??= loadAppConfig()
+  const cached = isDev ? devGraph : globalForGraph.__agentGraph;
+  if (cached) return cached;
+
+  const building = loadAppConfig()
     .then(buildAgentGraph)
     .catch((error: unknown) => {
-      globalForGraph.__agentGraph = undefined;
+      if (isDev) devGraph = undefined;
+      else globalForGraph.__agentGraph = undefined;
       throw error;
     });
-  return globalForGraph.__agentGraph;
+
+  if (isDev) devGraph = building;
+  else globalForGraph.__agentGraph = building;
+  return building;
 }
 
 export type { CompiledStateGraph };

@@ -8,6 +8,7 @@
 
 import {
   AIMessage,
+  HumanMessage,
   SystemMessage,
   type BaseMessage,
 } from "@langchain/core/messages";
@@ -202,14 +203,36 @@ export const MAX_AGENT_TOOL_CALLS = 8;
 export const RECURSION_LIMIT = 30;
 
 /**
- * Injected when the tool-call budget is exhausted. The final LLM hop runs
- * with tools DISABLED, so the model must answer now and the loop always
- * terminates.
+ * Delivered as a trailing user turn when the tool-call budget is spent.
+ * The final LLM hop runs with tools DISABLED, so the model must answer
+ * now and the loop always terminates — this only shapes the answer.
+ *
+ * ARRIVED AT BY MEASUREMENT, NOT TASTE — four variants were run against
+ * the same budget-exhausting question:
+ *
+ *   trailing system + "SYSTEM NOTICE:" → full answer, but the model
+ *       CONTINUED the message, so answers opened with a stray fragment
+ *       of instruction prose
+ *   leading system (merged into SYSTEM_PROMPT) → too distant to heed
+ *       after eight tool results; the model tried to keep calling tools
+ *       and emitted raw <function_calls> XML as prose
+ *   trailing user + "SYSTEM NOTICE:" → full answer and guardrail
+ *       honoured, but the label invited the model to QUOTE it verbatim
+ *   trailing user, softened to "that's enough research" → too weak;
+ *       XML leak again, 185-character answer
+ *
+ * Both working variants kept the explicit "none are available on this
+ * step"; both failures softened or distanced it. So that clause stays
+ * and only the quotable "SYSTEM NOTICE:" header goes — the smallest
+ * edit away from known-good text.
+ *
+ * The hard guarantee is elsewhere regardless: the final hop binds no
+ * tools, so the loop terminates whatever the model does with this.
  */
 export const TOOL_BUDGET_NOTICE =
-  "SYSTEM NOTICE: You have now used your entire tool-call budget for this turn. " +
-  "Do NOT request any more tools — none are available on this step. Using ONLY " +
-  "the data already gathered above, write your final answer now. Be explicit " +
+  "You have now used your entire tool-call budget for this turn. Do NOT " +
+  "request any more tools — none are available on this step. Using ONLY the " +
+  "data already gathered above, write your final answer now. Be explicit " +
   "that you limited scope to stay within your work budget: state which " +
   "crops/regions you analysed and which you deferred, and invite the user to " +
   "ask a follow-up so you can continue with the rest.";
@@ -312,9 +335,25 @@ export function buildLlmNode(
       // Budget exhausted — force the model to finalise. Running WITHOUT
       // tools bound guarantees the next message has no tool_calls, so
       // shouldContinue routes to END and the loop can never run away.
+      // That is the actual guardrail, and it does not depend on the
+      // notice at all — the notice only shapes HOW the model finalises.
+      //
+      // It is delivered as a trailing HUMAN message, and both halves of
+      // that matter. Trailing, because moving it into the leading system
+      // message made it too distant to heed: after eight tool results
+      // the model ignored it and tried to keep calling tools, emitting
+      // raw <function_calls> XML as prose because none were bound.
+      // Human rather than system, because a trailing SystemMessage is
+      // not addressed to anyone, and the model continued it instead of
+      // obeying it — every budget-exhausted answer opened with a stray
+      // fragment of instruction text. A user turn is unambiguously
+      // "respond to this now", which is exactly the intent.
+      //
+      // Ephemeral: only `response` is returned into state, so this never
+      // enters the conversation or the persisted transcript.
       response = (await baseLlm.invoke([
         ...messages,
-        new SystemMessage(TOOL_BUDGET_NOTICE),
+        new HumanMessage(TOOL_BUDGET_NOTICE),
       ])) as AIMessage;
     } else {
       response = (await llmWithTools.invoke(messages)) as AIMessage;

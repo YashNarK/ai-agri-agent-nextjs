@@ -148,6 +148,33 @@ type EmittedEvent =
   | StepFinishedEvent
   | CustomEvent;
 
+/**
+ * Best-effort human-readable rendering of anything that can be thrown.
+ *
+ * Not every rejection is an Error. Prisma in particular rejects with
+ * plain objects, and `String(obj)` renders those as "[object Object]",
+ * which is what this run's only diagnostic channel was reporting.
+ */
+function describeError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message || error.name;
+  }
+  if (typeof error === "object" && error !== null) {
+    const record = error as Record<string, unknown>;
+    for (const key of ["message", "detail", "error", "code"]) {
+      if (typeof record[key] === "string" && record[key] !== "") {
+        return record[key] as string;
+      }
+    }
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return Object.prototype.toString.call(error);
+    }
+  }
+  return String(error);
+}
+
 export interface AgriculturalAgentOptions {
   /** Correlates the AG-UI thread with a row in chat_sessions. */
   userId?: string | null;
@@ -175,11 +202,14 @@ export class AgriculturalAgent extends AbstractAgent {
       void this.stream(input, (event) => subscriber.next(event), abort.signal)
         .then(() => subscriber.complete())
         .catch((error: unknown) => {
-          // surfaced as a protocol event rather than an Observable error
-          // so the client shows a failed run instead of a dead stream
+          // the stream is the only channel back to the browser, so an
+          // unreadable message here is a dead end for whoever debugs it
+          // next — String(error) on a thrown plain object yields the
+          // famously useless "[object Object]"
+          console.error("[agui] run failed", error);
           subscriber.next({
             type: EventType.RUN_ERROR,
-            message: error instanceof Error ? error.message : String(error),
+            message: describeError(error),
           });
           subscriber.complete();
         });
