@@ -18,6 +18,7 @@ const LINKS = [
   { href: "/dashboard/crops", label: "Crops" },
   { href: "/dashboard/regions", label: "Regions" },
   { href: "/dashboard/knowledge", label: "Knowledge" },
+  { href: "/dashboard/assistant", label: "Assistant" },
 ];
 
 export function SiteNav() {
