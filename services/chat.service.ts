@@ -16,7 +16,7 @@ import { GraphRecursionError } from "@langchain/langgraph";
 import { randomUUID } from "node:crypto";
 
 import { getAgentGraph } from "@/agents/graph";
-import { RECURSION_LIMIT } from "@/agents/nodes";
+import { isAiMessage, RECURSION_LIMIT } from "@/agents/nodes";
 import { notFound } from "@/lib/errors";
 import type {
   ChatResponse,
@@ -67,7 +67,11 @@ export function extractFinalAiMessage(
 ): BaseMessage | undefined {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
-    if (msg instanceof AIMessage && chunkText(msg.content).trim() !== "") {
+    // isAiMessage, not `instanceof AIMessage`: streaming aggregation
+    // yields AIMessageChunk, which does not extend AIMessage, so
+    // instanceof would skip the real answer and fall through to the
+    // last message — usually the model's "let me check…" preamble.
+    if (isAiMessage(msg) && chunkText(msg.content).trim() !== "") {
       return msg;
     }
   }
@@ -88,10 +92,9 @@ export function collectAllToolCalls(
 ): ToolCallRecord[] | null {
   const all: ToolCallRecord[] = [];
   for (const msg of messages) {
-    if (msg instanceof AIMessage && msg.tool_calls) {
-      for (const tc of msg.tool_calls) {
-        all.push({ name: tc.name, args: tc.args });
-      }
+    if (!isAiMessage(msg)) continue;
+    for (const tc of (msg as AIMessage).tool_calls ?? []) {
+      all.push({ name: tc.name, args: tc.args });
     }
   }
   return all.length > 0 ? all : null;

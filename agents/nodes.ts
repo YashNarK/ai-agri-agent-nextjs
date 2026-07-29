@@ -214,14 +214,36 @@ export const TOOL_BUDGET_NOTICE =
   "crops/regions you analysed and which you deferred, and invite the user to " +
   "ask a follow-up so you can continue with the rest.";
 
+/**
+ * True for any assistant message, whether it arrived as an AIMessage or
+ * an AIMessageChunk.
+ *
+ * This distinction is load-bearing, not pedantic. The chat model runs
+ * with `streaming: true`, so `invoke()` aggregates the stream and hands
+ * back an **AIMessageChunk** — and AIMessageChunk does NOT extend
+ * AIMessage. An `instanceof AIMessage` test therefore returns false for
+ * a perfectly normal assistant turn, which silently ends the ReAct loop
+ * while a tool call is still pending.
+ *
+ * That failure is invisible from the outside: the run "succeeds" and
+ * returns the model's preamble ("let me check…") as if it were the
+ * answer. Comparing the message TYPE is stable across both shapes.
+ */
+export function isAiMessage(message: BaseMessage): boolean {
+  return message.getType() === "ai";
+}
+
+/** Assistant messages carry tool_calls; the base type does not declare it. */
+function toolCallsOf(message: BaseMessage) {
+  return (message as AIMessage).tool_calls ?? [];
+}
+
 /** Total tool calls the agent has already made this turn. */
 function countToolCalls(messages: BaseMessage[]): number {
-  return messages.reduce((total, msg) => {
-    if (msg instanceof AIMessage && msg.tool_calls) {
-      return total + msg.tool_calls.length;
-    }
-    return total;
-  }, 0);
+  return messages.reduce(
+    (total, msg) => (isAiMessage(msg) ? total + toolCallsOf(msg).length : total),
+    0,
+  );
 }
 
 /**
@@ -282,8 +304,11 @@ export function shouldContinue(state: AgentStateType): "tools" | "end" {
   const messages = state.messages;
   if (messages.length === 0) return "end";
 
+  // isAiMessage rather than `instanceof AIMessage`: with streaming on,
+  // the aggregated response is an AIMessageChunk, and instanceof would
+  // route a pending tool call straight to END.
   const last = messages[messages.length - 1];
-  if (last instanceof AIMessage && (last.tool_calls?.length ?? 0) > 0) {
+  if (isAiMessage(last) && toolCallsOf(last).length > 0) {
     return "tools";
   }
   return "end";
