@@ -15,6 +15,7 @@ const LINKS = [
   { href: "/dashboard", label: "Overview" },
   { href: "/dashboard/prices", label: "Prices" },
   { href: "/dashboard/forecasts", label: "Forecasts" },
+  { href: "/dashboard/crops", label: "Crops" },
   { href: "/dashboard/regions", label: "Regions" },
   { href: "/dashboard/knowledge", label: "Knowledge" },
 ];

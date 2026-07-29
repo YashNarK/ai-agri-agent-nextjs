@@ -26,6 +26,10 @@ export async function getCrops() {
   return cropsService.listCrops();
 }
 
+export async function getCrop(cropCode: string) {
+  return cropsService.getCropByCode(cropCode);
+}
+
 export async function getRegions() {
   return regionsService.listRegions();
 }

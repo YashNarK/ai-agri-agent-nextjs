@@ -5,8 +5,10 @@
 
 import Link from "next/link";
 
+import { RegionMap } from "@/components/charts/region-map";
 import {
   Card,
+  CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
@@ -32,6 +34,20 @@ export default async function RegionsPage() {
           yield history.
         </p>
       </header>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Where they are</CardTitle>
+          <CardDescription>
+            Plotted from stored coordinates. There is no country geometry in
+            the database, so this is a point map with a graticule for
+            orientation — nothing is shaded by value.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <RegionMap regions={regions} />
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {regions.map((region) => (

@@ -12,6 +12,11 @@
 
 import { Suspense } from "react";
 
+import {
+  CorrelationMatrix,
+  type CorrelationRow,
+} from "@/components/charts/correlation-matrix";
+import { pearson } from "@/components/charts/stats";
 import { PriceHistoryChart } from "@/components/charts/price-history-chart";
 import { SeasonalityHeatmap } from "@/components/charts/seasonality-heatmap";
 import {
@@ -25,6 +30,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   getAvailablePairs,
   getCrops,
+  getIndicators,
   getPriceHistory,
   getRegions,
 } from "@/lib/api";
@@ -35,6 +41,45 @@ export const metadata = {
   title: "Prices — Agricultural Intelligence",
 };
 
+/**
+ * Correlates the price series against each macro indicator.
+ *
+ * Both are monthly, but they are not guaranteed to cover the same
+ * months, so they are joined on the date key rather than zipped by
+ * index — zipping two differently-covered series silently compares
+ * unrelated months and produces a confident, meaningless number.
+ */
+function correlateWithMacros(
+  prices: { price_date: string; price_usd_tonne: number }[],
+  series: { indicator_name: string; points: { indicator_date: string; indicator_value: number }[] }[],
+): CorrelationRow[] {
+  const priceByDate = new Map(
+    prices.map((p) => [p.price_date, p.price_usd_tonne]),
+  );
+
+  const rows: CorrelationRow[] = [];
+  for (const indicator of series) {
+    const a: number[] = [];
+    const b: number[] = [];
+    for (const point of indicator.points) {
+      const price = priceByDate.get(point.indicator_date);
+      if (price !== undefined) {
+        a.push(price);
+        b.push(point.indicator_value);
+      }
+    }
+    const coefficient = pearson(a, b);
+    if (coefficient !== null) {
+      rows.push({
+        label: indicator.indicator_name,
+        coefficient,
+        overlap: a.length,
+      });
+    }
+  }
+  return rows;
+}
+
 async function PriceSection({
   cropCode,
   regionCode,
@@ -42,7 +87,12 @@ async function PriceSection({
   cropCode: string;
   regionCode: string;
 }) {
-  const history = await getPriceHistory(cropCode, regionCode, 200);
+  const [history, indicators] = await Promise.all([
+    getPriceHistory(cropCode, regionCode, 200),
+    getIndicators(),
+  ]);
+
+  const correlations = correlateWithMacros(history.prices, indicators.series);
 
   return (
     <div className="space-y-6">
@@ -74,6 +124,19 @@ async function PriceSection({
         </CardHeader>
         <CardContent>
           <SeasonalityHeatmap data={history.prices} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Macro indicators</CardTitle>
+          <CardDescription>
+            How this price moved relative to the four indicators the forecast
+            model consumes, over the months both series cover.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <CorrelationMatrix rows={correlations} />
         </CardContent>
       </Card>
     </div>
