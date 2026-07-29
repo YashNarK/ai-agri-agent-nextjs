@@ -11,12 +11,26 @@
 // They deliberately return PROSE, not JSON — the model reads these
 // strings directly. The MCP tools return structured JSON instead.
 //
+// Each tool ALSO returns a structured artifact via LangChain's
+// `content_and_artifact` response format, so the chat UI can render a
+// chart instead of parsing the prose back apart. The model's view is
+// unaffected: it still receives only the content string, byte for byte
+// what it received before. See agents/artifacts.ts.
+//
 // Port of agents/tools.py
 // ============================================================
 
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 
+import type {
+  AvailabilityArtifact,
+  ForecastArtifact,
+  IndicatorsArtifact,
+  KnowledgeArtifact,
+  PriceHistoryArtifact,
+  WeatherArtifact,
+} from "@/agents/artifacts";
 import type { AppConfig } from "@/lib/aws/app-config";
 import { ApiError } from "@/lib/errors";
 import { parseDateOnly, toDateString, toNumber, toNumberOrNull } from "@/lib/serialize";
@@ -76,10 +90,32 @@ export function buildAgentTools(container: Container, config: AppConfig) {
           "— never invent a price or forecast.",
       );
 
-      return lines.join("\n");
+      const artifact: AvailabilityArtifact = {
+        kind: "availability",
+        crops: crops.map((c) => ({
+          code: c.code,
+          name: c.name,
+          category: c.category,
+        })),
+        regions: regions.map((r) => ({
+          code: r.code,
+          name: r.name,
+          country: r.country,
+        })),
+        pairs: pairs.map((p) => ({
+          crop_code: p.crop_code,
+          region_code: p.region_code,
+          months: Number(p.months),
+          start_date: toDateString(p.start_date),
+          end_date: toDateString(p.end_date),
+        })),
+      };
+
+      return [lines.join("\n"), artifact];
     },
     {
       name: "list_available_crops",
+      responseFormat: "content_and_artifact",
       description:
         "List the crop codes, region codes, and — most importantly — the " +
         "exact (crop, region) pairs that actually have price history in the " +
@@ -102,10 +138,10 @@ export function buildAgentTools(container: Container, config: AppConfig) {
       });
 
       if (results.length === 0) {
-        return "No relevant agronomic knowledge found for this query.";
+        return ["No relevant agronomic knowledge found for this query.", null];
       }
 
-      return results
+      const prose = results
         .map(
           (row) =>
             `[${row.category || "General"}] ${row.title}\n` +
@@ -113,9 +149,24 @@ export function buildAgentTools(container: Container, config: AppConfig) {
             `Source: ${row.source || "Unknown"} | Similarity: ${row.similarity.toFixed(2)}`,
         )
         .join("\n\n---\n\n");
+
+      const artifact: KnowledgeArtifact = {
+        kind: "knowledge",
+        query,
+        results: results.map((row) => ({
+          title: row.title,
+          category: row.category,
+          source: row.source,
+          similarity: row.similarity,
+          excerpt: row.content.slice(0, 500),
+        })),
+      };
+
+      return [prose, artifact];
     },
     {
       name: "search_agronomic_knowledge",
+      responseFormat: "content_and_artifact",
       description:
         "Search the agronomic knowledge base for information about crop management, " +
         "pest control, disease management, soil health, irrigation and best practices. " +
@@ -139,12 +190,12 @@ export function buildAgentTools(container: Container, config: AppConfig) {
 
       const crop = await cropRepo.findByCode(crop_code);
       if (!crop) {
-        return `Crop '${crop_code}' not found in the database.`;
+        return [`Crop '${crop_code}' not found in the database.`, null];
       }
 
       const region = await regionRepo.findByCode(region_code);
       if (!region) {
-        return `Region '${region_code}' not found in the database.`;
+        return [`Region '${region_code}' not found in the database.`, null];
       }
 
       const cutoff = new Date(Date.now() - monthsBack * 30 * 86_400_000);
@@ -157,10 +208,11 @@ export function buildAgentTools(container: Container, config: AppConfig) {
       });
 
       if (prices.length === 0) {
-        return (
+        return [
           `No price history found for ${crop_code} in ${region_code} ` +
-          `over the last ${monthsBack} months.`
-        );
+            `over the last ${monthsBack} months.`,
+          null,
+        ];
       }
 
       const lines = [`Price history for ${crop.name} in ${region.name}:`];
@@ -181,10 +233,28 @@ export function buildAgentTools(container: Container, config: AppConfig) {
           `${changePct >= 0 ? "+" : ""}${changePct.toFixed(1)}%`,
       );
 
-      return lines.join("\n");
+      const artifact: PriceHistoryArtifact = {
+        kind: "price_history",
+        crop: crop.name,
+        region: region.name,
+        crop_code,
+        region_code,
+        // the repository returns newest-first; a time axis wants the
+        // opposite, so reverse once here rather than in every renderer
+        points: [...prices].reverse().map((p) => ({
+          price_date: toDateString(p.price_date),
+          price_usd_tonne: toNumber(p.price_usd_tonne),
+          volume_traded: toNumberOrNull(p.volume_traded),
+        })),
+        latest,
+        change_pct: changePct,
+      };
+
+      return [lines.join("\n"), artifact];
     },
     {
       name: "get_crop_price_history",
+      responseFormat: "content_and_artifact",
       description:
         "Retrieve historical commodity price data for a crop in a region. " +
         "Use this when the user asks about past prices, price trends, or history. " +
@@ -208,17 +278,20 @@ export function buildAgentTools(container: Container, config: AppConfig) {
       try {
         targetDate = parseDateOnly(target_date);
       } catch {
-        return `Invalid target_date format '${target_date}'. Use YYYY-MM-DD.`;
+        return [
+          `Invalid target_date format '${target_date}'. Use YYYY-MM-DD.`,
+          null,
+        ];
       }
 
       const crop = await cropRepo.findByCode(crop_code);
       if (!crop) {
-        return `Crop '${crop_code}' not found.`;
+        return [`Crop '${crop_code}' not found.`, null];
       }
 
       const region = await regionRepo.findByCode(region_code);
       if (!region) {
-        return `Region '${region_code}' not found.`;
+        return [`Region '${region_code}' not found.`, null];
       }
 
       let features;
@@ -232,13 +305,14 @@ export function buildAgentTools(container: Container, config: AppConfig) {
         );
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
-        return (
+        return [
           `NO FORECAST AVAILABLE for ${crop_code} @ ${region_code}: ` +
-          `${detail}. This pair has no price history to base a prediction ` +
-          `on. Do NOT fabricate a value — tell the user this crop/region ` +
-          `cannot be forecast and call list_available_crops to see which ` +
-          `pairs can.`
-        );
+            `${detail}. This pair has no price history to base a prediction ` +
+            `on. Do NOT fabricate a value — tell the user this crop/region ` +
+            `cannot be forecast and call list_available_crops to see which ` +
+            `pairs can.`,
+          null,
+        ];
       }
 
       let prediction;
@@ -251,22 +325,42 @@ export function buildAgentTools(container: Container, config: AppConfig) {
             : error instanceof Error
               ? error.message
               : String(error);
-        return detail.startsWith("Azure ML endpoint error")
-          ? detail
-          : `Azure ML endpoint error: ${detail}`;
+        return [
+          detail.startsWith("Azure ML endpoint error")
+            ? detail
+            : `Azure ML endpoint error: ${detail}`,
+          null,
+        ];
       }
 
       const { predictedPrice, confidenceLow, confidenceHigh } = prediction;
 
-      return (
+      const prose =
         `Price prediction for ${crop.name} in ${region.name} on ${target_date}:\n` +
         `  Predicted price : $${money(predictedPrice)}/tonne\n` +
         `  Confidence low  : $${money(confidenceLow ?? predictedPrice)}/tonne\n` +
-        `  Confidence high : $${money(confidenceHigh ?? predictedPrice)}/tonne`
-      );
+        `  Confidence high : $${money(confidenceHigh ?? predictedPrice)}/tonne`;
+
+      const artifact: ForecastArtifact = {
+        kind: "forecast",
+        crop: crop.name,
+        region: region.name,
+        crop_code,
+        region_code,
+        target_date,
+        predicted_price: predictedPrice,
+        // kept null rather than collapsed onto the point estimate the way
+        // the prose does — a chart drawing a zero-width band would claim
+        // certainty the model never reported
+        confidence_low: confidenceLow ?? null,
+        confidence_high: confidenceHigh ?? null,
+      };
+
+      return [prose, artifact];
     },
     {
       name: "predict_crop_price",
+      responseFormat: "content_and_artifact",
       description:
         "Predict the future commodity price for a crop in a region via the Azure ML model. " +
         "Use this when the user asks about future prices, forecasts, or predictions. " +
@@ -289,12 +383,12 @@ export function buildAgentTools(container: Container, config: AppConfig) {
     async ({ region_code }) => {
       const region = await regionRepo.findByCode(region_code);
       if (!region) {
-        return `Region '${region_code}' not found.`;
+        return [`Region '${region_code}' not found.`, null];
       }
 
       const records = await weatherRepo.findRecentByRegion(region.id, 3);
       if (records.length === 0) {
-        return `No weather data found for region ${region_code}.`;
+        return [`No weather data found for region ${region_code}.`, null];
       }
 
       const lines = [`Recent weather for ${region.name} (${region.country}):`];
@@ -306,10 +400,24 @@ export function buildAgentTools(container: Container, config: AppConfig) {
             `drought_index=${toNumberOrNull(w.drought_index)}`,
         );
       }
-      return lines.join("\n");
+
+      const artifact: WeatherArtifact = {
+        kind: "weather",
+        region: region.name,
+        region_code,
+        records: records.map((w) => ({
+          weather_date: toDateString(w.weather_date),
+          temp_avg_c: toNumberOrNull(w.temp_avg_c),
+          rainfall_mm: toNumberOrNull(w.rainfall_mm),
+          drought_index: toNumberOrNull(w.drought_index),
+        })),
+      };
+
+      return [lines.join("\n"), artifact];
     },
     {
       name: "get_weather_outlook",
+      responseFormat: "content_and_artifact",
       description:
         "Retrieve recent weather data and drought index for a region. " +
         "Use this when the user asks about weather conditions, drought risk, " +
@@ -325,7 +433,7 @@ export function buildAgentTools(container: Container, config: AppConfig) {
     async () => {
       const latest = await marketIndicatorRepo.findLatestPerIndicator();
       if (latest.length === 0) {
-        return "No market indicator data available.";
+        return ["No market indicator data available.", null];
       }
 
       const lines = ["Current macro market indicators:"];
@@ -336,10 +444,22 @@ export function buildAgentTools(container: Container, config: AppConfig) {
             `${m.unit ?? ""}  (as of ${toDateString(m.indicator_date)})`,
         );
       }
-      return lines.join("\n");
+
+      const artifact: IndicatorsArtifact = {
+        kind: "indicators",
+        indicators: latest.map((m) => ({
+          indicator_name: m.indicator_name,
+          indicator_value: toNumber(m.indicator_value),
+          unit: m.unit ?? null,
+          indicator_date: toDateString(m.indicator_date),
+        })),
+      };
+
+      return [lines.join("\n"), artifact];
     },
     {
       name: "get_market_indicators",
+      responseFormat: "content_and_artifact",
       description:
         "Retrieve current macro market indicators including oil prices, " +
         "fertilizer costs and food price indices. " +
