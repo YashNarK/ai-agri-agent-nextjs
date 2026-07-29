@@ -16,6 +16,8 @@ import {
   indicatorsService,
   pricesService,
   regionsService,
+  weatherService,
+  yieldsService,
 } from "@/lib/container";
 
 export async function getCrops() {
@@ -40,4 +42,16 @@ export async function getPriceHistory(
 
 export async function getIndicators(names?: string[]) {
   return indicatorsService.getSeries({ names: names ?? null });
+}
+
+export async function getRegion(regionCode: string) {
+  return regionsService.getRegionByCode(regionCode);
+}
+
+export async function getWeather(regionCode: string, limit = 400) {
+  return weatherService.getWeather({ regionCode, limit });
+}
+
+export async function getYields(cropCode: string, regionCode?: string) {
+  return yieldsService.getYields({ cropCode, regionCode: regionCode ?? null });
 }

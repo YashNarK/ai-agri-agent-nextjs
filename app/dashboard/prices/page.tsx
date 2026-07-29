@@ -13,6 +13,7 @@
 import { Suspense } from "react";
 
 import { PriceHistoryChart } from "@/components/charts/price-history-chart";
+import { SeasonalityHeatmap } from "@/components/charts/seasonality-heatmap";
 import {
   Card,
   CardContent,
@@ -44,23 +45,38 @@ async function PriceSection({
   const history = await getPriceHistory(cropCode, regionCode, 200);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>
-          {history.crop} — {history.region}
-        </CardTitle>
-        <CardDescription>
-          {history.total} monthly observations, USD per tonne
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <PriceHistoryChart
-          data={history.prices}
-          cropName={history.crop}
-          regionName={history.region}
-        />
-      </CardContent>
-    </Card>
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            {history.crop} — {history.region}
+          </CardTitle>
+          <CardDescription>
+            {history.total} monthly observations, USD per tonne
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <PriceHistoryChart
+            data={history.prices}
+            cropName={history.crop}
+            regionName={history.region}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Seasonality</CardTitle>
+          <CardDescription>
+            The same prices arranged by month and year. Recurring highs line up
+            vertically, which a single continuous line hides.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SeasonalityHeatmap data={history.prices} />
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
