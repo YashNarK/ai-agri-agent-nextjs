@@ -36,7 +36,15 @@ export const settings = {
   HTTP_CLIENT_TIMEOUT_MS: num("HTTP_CLIENT_TIMEOUT", 30) * 1000,
 
   // aws — where to find things, not the things themselves
-  AWS_REGION: str("AWS_REGION", "ap-south-1"),
+  //
+  // Deliberately NOT read from $AWS_REGION. That name is a reserved Lambda
+  // runtime variable, and Vercel functions run on Lambda: the runtime sets
+  // it to the *function's* region (us-east-1 for iad1), overriding whatever
+  // the project config says. Reading it sent GetSecretValue to us-east-1,
+  // where the prod/agri/* policy grants nothing — an AccessDeniedException
+  // that reproduced only on Vercel. $APP_AWS_REGION is ours alone, so no
+  // platform can quietly redirect the SDK away from where the secrets live.
+  AWS_REGION: str("APP_AWS_REGION", "ap-south-1"),
   DB_SECRET_NAME: str("DB_SECRET_NAME", "prod/agri/database"),
   AZURE_OPENAI_SECRET_NAME: str("AZURE_OPENAI_SECRET_NAME", "prod/agri/azure-openai"),
   AZURE_ML_SECRET_NAME: str("AZURE_ML_SECRET_NAME", "prod/agri/azure-ml"),
