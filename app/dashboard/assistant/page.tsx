@@ -20,6 +20,7 @@ import { requireApproved } from "@/lib/auth/guard";
 import { chatService } from "@/lib/container";
 
 import { ConversationList } from "./conversation-list";
+import { ConversationSheet } from "./conversation-sheet";
 
 export const metadata = {
   title: "Assistant — Agricultural Intelligence",
@@ -62,10 +63,24 @@ export default async function AssistantPage({
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-4rem)] w-full max-w-[88rem] flex-col px-6 py-6">
-      <header className="mb-4 space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Assistant</h1>
-        <p className="text-sm text-muted-foreground">
+    // dvh, not vh: on a phone `100vh` is the viewport with browser chrome
+    // RETRACTED, so a vh-based full-height layout pushes the composer
+    // below the address bar until you scroll. dvh tracks the visible area.
+    <div className="mx-auto flex h-[calc(100dvh-3.5rem)] w-full max-w-[88rem] flex-col px-4 py-4 sm:px-6 sm:py-6">
+      <header className="mb-3 space-y-1 sm:mb-4">
+        <div className="flex items-start justify-between gap-3">
+          <h1 className="text-2xl font-semibold tracking-tight">Assistant</h1>
+          {/* Phones only. The switcher below is display:none at this
+              width, so without this there is no way to reach another
+              conversation at all. */}
+          <div className="md:hidden">
+            <ConversationSheet
+              conversations={conversations}
+              activeThreadId={thread}
+            />
+          </div>
+        </div>
+        <p className="hidden text-sm text-muted-foreground sm:block">
           Asks the same database the dashboard reads. Every figure it quotes
           comes from a tool call shown inline — nothing is recalled from the
           model&apos;s memory.

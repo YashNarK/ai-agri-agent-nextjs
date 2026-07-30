@@ -130,7 +130,7 @@ export default async function KnowledgePage({
   const crops = await getCrops();
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6 px-6 py-8">
+    <div className="mx-auto w-full max-w-3xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">
           Agronomic knowledge

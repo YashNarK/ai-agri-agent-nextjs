@@ -77,7 +77,7 @@ export default async function RegionPage({
   const cropsHere = pairs.filter((p) => p.region_code === region.code);
 
   return (
-    <div className="mx-auto w-full max-w-[88rem] space-y-6 px-6 py-8">
+    <div className="mx-auto w-full max-w-[88rem] space-y-6 px-4 py-6 sm:px-6 sm:py-8">
       <header className="space-y-2">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-semibold tracking-tight">

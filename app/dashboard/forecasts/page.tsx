@@ -155,7 +155,7 @@ export default async function ForecastsPage({
   const defaultTarget = isoDaysFromToday(30);
 
   return (
-    <div className="mx-auto w-full max-w-[88rem] space-y-6 px-6 py-8">
+    <div className="mx-auto w-full max-w-[88rem] space-y-6 px-4 py-6 sm:px-6 sm:py-8">
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">Forecasts</h1>
         <p className="text-sm text-muted-foreground">

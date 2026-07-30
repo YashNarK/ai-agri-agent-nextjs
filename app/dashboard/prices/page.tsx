@@ -167,7 +167,7 @@ export default async function PricesPage({
   const regionNames = Object.fromEntries(regions.map((r) => [r.code, r.name]));
 
   return (
-    <div className="mx-auto w-full max-w-[88rem] space-y-6 px-6 py-8">
+    <div className="mx-auto w-full max-w-[88rem] space-y-6 px-4 py-6 sm:px-6 sm:py-8">
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">Price explorer</h1>
         <p className="text-sm text-muted-foreground">
