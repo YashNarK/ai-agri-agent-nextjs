@@ -112,6 +112,9 @@ export function ForecastChart({
       dimensions={dimensions}
       containerRef={ref}
       height={height}
+      // Observed history as a line, the model's point estimate as a mark,
+      // and the prediction interval as a band behind it.
+      chartType="Time-series forecast chart with prediction-interval band"
       title={`Price history and forecast for ${cropName} in ${regionName}`}
       legend={[
         { label: "Observed price", color: HISTORY_COLOR },

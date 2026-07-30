@@ -63,8 +63,17 @@ export async function getYields(cropCode: string, regionCode?: string) {
 }
 
 /** Reads already-logged forecasts. Does NOT call Azure ML. */
-export async function getLoggedPredictions(limit = 50) {
-  return predictionsService.listPredictions({ limit });
+export async function getLoggedPredictions(
+  limit = 50,
+  page = 1,
+  search?: string | null,
+) {
+  return predictionsService.listPredictions({ limit, page, search });
+}
+
+/** One logged forecast by id, for the `?id=` selection. */
+export async function getPrediction(id: number) {
+  return Number.isFinite(id) ? predictionsService.getPrediction(id) : null;
 }
 
 /**

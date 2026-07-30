@@ -157,6 +157,10 @@ export function PriceHistoryChart({
         dimensions={dimensions}
         containerRef={ref}
         height={height}
+        // Two stacked panels sharing one time axis: a line for price
+        // (position encoding, non-zero baseline) and columns for volume
+        // (length encoding, zero baseline).
+        chartType="Time-series line chart with volume column subplot"
         title={`Price and traded volume for ${cropName} in ${regionName}`}
         legend={[
           { label: "Price (USD/tonne)", color: PRICE_COLOR },

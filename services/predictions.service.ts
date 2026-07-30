@@ -37,6 +37,32 @@ const MACRO_FALLBACKS: Record<string, number> = {
 
 export type FeatureRow = Record<string, string | number>;
 
+/** A persisted forecast row, with its crop and region, as the API shape. */
+type PredictionRow = NonNullable<
+  Awaited<ReturnType<PredictionRepository["findById"]>>
+>;
+
+/** One place that maps a row to LoggedPrediction, used by list and by id. */
+function toLoggedPrediction(row: PredictionRow): LoggedPrediction {
+  return {
+    id: Number(row.id),
+    crop_code: row.crops.code,
+    crop_name: row.crops.name,
+    region_code: row.regions.code,
+    region_name: row.regions.name,
+    target_date: toDateString(row.target_date),
+    prediction_date: row.prediction_date.toISOString(),
+    predicted_price: toNumber(row.predicted_price),
+    confidence_low: toNumberOrNull(row.confidence_low),
+    confidence_high: toNumberOrNull(row.confidence_high),
+    model_version: row.model_version,
+    features_used: (row.features_used ?? null) as Record<
+      string,
+      number | string
+    > | null,
+  };
+}
+
 interface ParsedPrediction {
   predictedPrice: number;
   confidenceLow: number | null;
@@ -113,10 +139,15 @@ export class PredictionsService {
     cropCode,
     regionCode,
     limit,
+    page = 1,
+    search,
   }: {
     cropCode?: string | null;
     regionCode?: string | null;
     limit?: number;
+    /** 1-based. Out-of-range pages return an empty list, not an error. */
+    page?: number;
+    search?: string | null;
   }): Promise<PredictionListResponse> {
     const crop = cropCode
       ? await this.cropsService.requireCropByCode(cropCode)
@@ -125,31 +156,38 @@ export class PredictionsService {
       ? await this.regionsService.requireRegionByCode(regionCode)
       : null;
 
-    const rows = await this.predictionRepo.list({
+    const filter = {
       cropId: crop?.id ?? null,
       regionId: region?.id ?? null,
-      limit,
-    });
+      search,
+    };
 
-    const predictions: LoggedPrediction[] = rows.map((row) => ({
-      id: Number(row.id),
-      crop_code: row.crops.code,
-      crop_name: row.crops.name,
-      region_code: row.regions.code,
-      region_name: row.regions.name,
-      target_date: toDateString(row.target_date),
-      prediction_date: row.prediction_date.toISOString(),
-      predicted_price: toNumber(row.predicted_price),
-      confidence_low: toNumberOrNull(row.confidence_low),
-      confidence_high: toNumberOrNull(row.confidence_high),
-      model_version: row.model_version,
-      features_used: (row.features_used ?? null) as Record<
-        string,
-        number | string
-      > | null,
-    }));
+    // `total` is the count of everything MATCHING, not the length of this
+    // page — the pager needs to know how many pages exist, and the two
+    // numbers stopped being the same once paging arrived.
+    const [rows, total] = await Promise.all([
+      this.predictionRepo.list({
+        ...filter,
+        limit,
+        skip: Math.max(0, (page - 1) * (limit ?? 100)),
+      }),
+      this.predictionRepo.count(filter),
+    ]);
 
-    return { predictions, total: predictions.length };
+    return { predictions: rows.map(toLoggedPrediction), total };
+  }
+
+  /**
+   * One logged forecast by id, or null.
+   *
+   * Separate from listPredictions because the selected forecast is
+   * addressed by id in the URL and need not appear in the page being
+   * shown — a search filter or a later page both hide it.
+   */
+  async getPrediction(id: number): Promise<LoggedPrediction | null> {
+    const row = await this.predictionRepo.findById(id);
+    if (!row) return null;
+    return toLoggedPrediction(row);
   }
 
   /**

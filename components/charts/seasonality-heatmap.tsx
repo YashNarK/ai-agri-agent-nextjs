@@ -17,7 +17,7 @@ import { scaleQuantize } from "d3-scale";
 import { useMemo, useState } from "react";
 
 import { formatUsdPrecise, parseIsoDate } from "./format";
-import { ExpandButton } from "./primitives/chart-frame";
+import { ChartTypeLabel, ExpandButton } from "./primitives/chart-frame";
 import { ChartTooltip } from "./primitives/tooltip";
 import { useChartDimensions } from "./primitives/use-chart-dimensions";
 import { useFullscreen } from "./primitives/use-fullscreen";
@@ -98,9 +98,14 @@ export function SeasonalityHeatmap({
         isFullscreen && "flex h-screen flex-col bg-background p-6",
       )}
     >
+      {/* A dense month × year matrix where colour, not position, carries
+          the measure — and the cyclical month axis is what makes it a
+          seasonality plot rather than a generic heatmap. */}
+      <ChartTypeLabel>Heatmap (month × year seasonality matrix)</ChartTypeLabel>
+
       {/* Continuous legend — a sequential scale is ordered by lightness,
           so it needs a low/high anchor rather than a keyed list */}
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mt-1 mb-3 flex items-center gap-2">
         <span className="text-xs text-muted-foreground">Lower</span>
         <div className="flex h-2 flex-1 overflow-hidden rounded-full">
           {SEQUENTIAL.map((step) => (

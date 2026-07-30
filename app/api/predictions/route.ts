@@ -55,18 +55,22 @@ export async function GET(request: Request) {
       crop_code: searchParams.get("crop_code") ?? undefined,
       region_code: searchParams.get("region_code") ?? undefined,
       limit: searchParams.get("limit") ?? undefined,
+      page: searchParams.get("page") ?? undefined,
+      q: searchParams.get("q") ?? undefined,
     });
     if (!parsed.success) {
       throw new ApiError(422, parsed.error.issues[0].message);
     }
 
-    const { crop_code, region_code, limit } = parsed.data;
+    const { crop_code, region_code, limit, page, q } = parsed.data;
 
     return NextResponse.json(
       await predictionsService.listPredictions({
         cropCode: crop_code,
         regionCode: region_code,
         limit,
+        page,
+        search: q,
       }),
     );
   } catch (error) {

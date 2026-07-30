@@ -36,7 +36,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { requireApproved } from "@/lib/auth/guard";
-import { getCrops, getLoggedPredictions, getPriceHistory, getRegions } from "@/lib/api";
+import {
+  getCrops,
+  getLoggedPredictions,
+  getPrediction,
+  getPriceHistory,
+  getRegions,
+} from "@/lib/api";
+import { TablePagination, TableSearch } from "@/components/ui/table-toolbar";
 import type { LoggedPrediction } from "@/lib/schemas";
 
 import { isoDaysFromToday } from "./dates";
@@ -45,6 +52,12 @@ import { PredictionForm } from "./prediction-form";
 
 export const metadata = { title: "Forecasts" };
 export const dynamic = "force-dynamic";
+
+/**
+ * Rows per page. Small enough that the table never needs its own scroll
+ * region, which keeps the pager visible without the page jumping.
+ */
+const PAGE_SIZE = 20;
 
 async function ForecastDetail({ forecast }: { forecast: LoggedPrediction }) {
   // last ~3 years of context, enough to read the trend the forecast
@@ -103,20 +116,28 @@ async function ForecastDetail({ forecast }: { forecast: LoggedPrediction }) {
 export default async function ForecastsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ id?: string }>;
+  searchParams: Promise<{ id?: string; q?: string; page?: string }>;
 }) {
   // Running a forecast calls Azure ML, and model output is not public.
   await requireApproved("/dashboard/forecasts");
 
   const params = await searchParams;
+  const query = params.q?.trim() || null;
+  const page = Math.max(1, Number(params.page) || 1);
+
   const [{ predictions, total }, cropList, regions] = await Promise.all([
-    getLoggedPredictions(50),
+    getLoggedPredictions(PAGE_SIZE, page, query),
     getCrops(),
     getRegions(),
   ]);
 
+  // Fetched by id, not looked up in the rows above: the selected
+  // forecast need not be on the page being shown — a search filter or
+  // any page past the first hides it, and a fresh run redirects here
+  // with an id before the table has been paged at all.
   const selected =
-    predictions.find((p) => String(p.id) === params.id) ?? predictions[0];
+    (params.id ? await getPrediction(Number(params.id)) : null) ??
+    predictions[0];
 
   // Bounds computed on the server so the earliest selectable date does
   // not depend on the viewer's clock or timezone, and matches what the
@@ -153,7 +174,7 @@ export default async function ForecastsPage({
         </CardContent>
       </Card>
 
-      {total === 0 ? (
+      {total === 0 && !query ? (
         <p className="text-sm text-muted-foreground">
           No forecasts have been run yet. Use the form above to make the first
           one.
@@ -170,11 +191,18 @@ export default async function ForecastsPage({
           )}
 
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Recent forecasts</CardTitle>
-              <CardDescription>
-                {total} most recent. Select one to inspect it.
-              </CardDescription>
+            <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-1.5">
+                <CardTitle className="text-base">Forecast log</CardTitle>
+                <CardDescription>
+                  Every run, newest first. Select one to inspect it.
+                </CardDescription>
+              </div>
+              {/* Suspense because TableSearch reads useSearchParams, which
+                  would otherwise opt this whole route out of prerendering. */}
+              <Suspense fallback={null}>
+                <TableSearch placeholder="Search crop or region…" />
+              </Suspense>
             </CardHeader>
             <CardContent className="px-0">
               <div className="overflow-x-auto">
@@ -219,7 +247,21 @@ export default async function ForecastsPage({
                     ))}
                   </TableBody>
                 </Table>
+
+                {predictions.length === 0 && (
+                  <p className="px-6 py-8 text-center text-sm text-muted-foreground">
+                    No forecasts match {query ? `“${query}”` : "this filter"}.
+                  </p>
+                )}
               </div>
+
+              <Suspense fallback={null}>
+                <TablePagination
+                  page={page}
+                  pageSize={PAGE_SIZE}
+                  total={total}
+                />
+              </Suspense>
             </CardContent>
           </Card>
         </>

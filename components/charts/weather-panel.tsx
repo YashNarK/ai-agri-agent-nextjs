@@ -22,7 +22,7 @@ import { useMemo } from "react";
 
 import { formatDecimal, formatMonthYear, parseIsoDate } from "./format";
 import { AxisBottom, AxisLeft } from "./primitives/axis";
-import { ExpandButton } from "./primitives/chart-frame";
+import { ChartTypeLabel, ExpandButton } from "./primitives/chart-frame";
 import { useChartDimensions } from "./primitives/use-chart-dimensions";
 import { useFullscreen } from "./primitives/use-fullscreen";
 import { CHROME, MARKS, seriesColor } from "./theme";
@@ -158,7 +158,13 @@ export function WeatherPanel({
     >
       {/* Each panel is titled rather than legended: one measure per
           panel means the title alone identifies the series */}
-      <div className="flex justify-end">
+      <div className="flex items-start justify-between gap-4">
+        {/* Three stacked panels sharing one time axis, each with its own
+            y scale — °C, mm and a unitless index do not share a scale, so
+            overlaying them would imply a comparison that has no meaning. */}
+        <ChartTypeLabel>
+          Small multiples (faceted time series, shared x-axis)
+        </ChartTypeLabel>
         <ExpandButton
           isFullscreen={isFullscreen}
           onToggle={toggle}

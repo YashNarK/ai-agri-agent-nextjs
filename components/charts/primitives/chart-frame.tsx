@@ -49,6 +49,31 @@ interface ChartFrameProps {
   height?: number;
   /** Opt out for inline sparkline-scale marks, where expanding is noise. */
   expandable?: boolean;
+  /**
+   * The chart's form, by its proper name — "Bubble chart", "Heatmap",
+   * "Small multiples".
+   *
+   * Named rather than left implicit because the form IS a claim about
+   * the data: a bubble chart asserts the size encoding is meaningful, a
+   * heatmap asserts the matrix is dense. Labelling it tells a reader what
+   * kind of comparison the chart is inviting, and keeps us honest about
+   * whether we picked the right one.
+   */
+  chartType?: string;
+}
+
+/**
+ * The chart's form, in small caps above the plot.
+ *
+ * Exported so the charts that render their own SVG can show it in the
+ * same place and style as the ones going through ChartFrame.
+ */
+export function ChartTypeLabel({ children }: { children: string }) {
+  return (
+    <p className="text-[11px] font-medium tracking-[0.08em] text-muted-foreground uppercase">
+      {children}
+    </p>
+  );
 }
 
 /**
@@ -117,6 +142,7 @@ export function ChartFrame({
   overlay,
   height,
   expandable = true,
+  chartType,
 }: ChartFrameProps) {
   const { width, height: measuredHeight, margin } = dimensions;
   const { ref, isFullscreen, toggle } = useFullscreen<HTMLDivElement>();
@@ -135,25 +161,27 @@ export function ChartFrame({
       )}
     >
       <div className="flex items-start justify-between gap-4">
-        {legend && legend.length >= 2 ? (
-          <ul className="mb-2 flex flex-wrap gap-x-4 gap-y-1">
-            {legend.map((item) => (
-              <li
-                key={item.label}
-                className="flex items-center gap-1.5 text-xs text-muted-foreground"
-              >
-                <span
-                  aria-hidden="true"
-                  className="inline-block size-2.5 shrink-0 rounded-[2px]"
-                  style={{ background: item.color }}
-                />
-                {item.label}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <span />
-        )}
+        <div className="mb-2 min-w-0 space-y-1">
+          {chartType && <ChartTypeLabel>{chartType}</ChartTypeLabel>}
+
+          {legend && legend.length >= 2 && (
+            <ul className="flex flex-wrap gap-x-4 gap-y-1">
+              {legend.map((item) => (
+                <li
+                  key={item.label}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                >
+                  <span
+                    aria-hidden="true"
+                    className="inline-block size-2.5 shrink-0 rounded-[2px]"
+                    style={{ background: item.color }}
+                  />
+                  {item.label}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
 
         {expandable && (
           <ExpandButton

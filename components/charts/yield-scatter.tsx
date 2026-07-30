@@ -121,6 +121,10 @@ export function YieldScatter({ data, cropName, height = 340 }: YieldScatterProps
       dimensions={dimensions}
       containerRef={ref}
       height={height}
+      // Scatter plot with a third variable on mark size — the textbook
+      // definition of a bubble chart. scaleSqrt keeps area, not radius,
+      // proportional to production.
+      chartType="Bubble chart (scatter plot with size encoding)"
       title={`Yield against harvested area for ${cropName}, by region`}
       legend={groups}
       overlay={

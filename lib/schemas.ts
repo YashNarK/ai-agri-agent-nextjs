@@ -249,6 +249,10 @@ export const predictionListQuerySchema = z.object({
   crop_code: z.string().optional(),
   region_code: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),
+  /** 1-based page. Out of range yields an empty list, not an error. */
+  page: z.coerce.number().int().min(1).default(1),
+  /** Free text matched against crop and region code or name. */
+  q: z.string().trim().max(100).optional(),
 });
 
 export interface PredictionResponse {

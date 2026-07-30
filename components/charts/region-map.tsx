@@ -29,7 +29,7 @@ import type { GeometryCollection, Topology } from "topojson-specification";
 
 import worldTopology from "world-atlas/countries-110m.json";
 
-import { ExpandButton } from "./primitives/chart-frame";
+import { ChartTypeLabel, ExpandButton } from "./primitives/chart-frame";
 import { useChartDimensions } from "./primitives/use-chart-dimensions";
 import { useFullscreen } from "./primitives/use-fullscreen";
 import { ChartTooltip } from "./primitives/tooltip";
@@ -209,7 +209,12 @@ export function RegionMap({
         isFullscreen && "flex h-screen flex-col bg-background p-6",
       )}
     >
-      <div className="flex justify-end">
+      <div className="flex items-start justify-between gap-4">
+        {/* A point (dot) map, NOT a choropleth — regions are plotted as
+            marks at coordinates; no area is shaded by value. */}
+        <ChartTypeLabel>
+          Point map on an orthographic (globe) projection
+        </ChartTypeLabel>
         <ExpandButton
           isFullscreen={isFullscreen}
           onToggle={toggle}
