@@ -198,7 +198,23 @@ export class ChatService {
    * but their inline renderings belong to a live run — replaying them from
    * a transcript would show chart cards with no run behind them.
    */
-  async getTranscript(sessionId: string): Promise<TranscriptResponse> {
+  async getTranscript(
+    sessionId: string,
+    viewerId: string,
+  ): Promise<TranscriptResponse> {
+    // Ownership, not just existence. The thread id is a UUID in the URL,
+    // which is unguessable but not secret — it survives in history, in
+    // shared links and in logs — so it cannot be the only thing standing
+    // between one user and another user's conversation.
+    //
+    // An existing session owned by somebody else is reported as empty
+    // rather than 403: a distinct error would confirm that the id names
+    // a real conversation, which is exactly what a prober wants to know.
+    const session = await this.chatRepo.findSession(sessionId);
+    if (session && session.user_id !== viewerId) {
+      return { session_id: sessionId, messages: [] };
+    }
+
     const rows = await this.chatRepo.listMessages(sessionId);
 
     const messages: TranscriptMessage[] = rows

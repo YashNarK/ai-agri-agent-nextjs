@@ -17,6 +17,7 @@ import { randomUUID } from "node:crypto";
 import { redirect } from "next/navigation";
 
 import { AssistantChat } from "@/components/chat/assistant-chat";
+import { requireApproved } from "@/lib/auth/guard";
 
 export const metadata = {
   title: "Assistant — Agricultural Intelligence",
@@ -31,6 +32,10 @@ export default async function AssistantPage({
 }: {
   searchParams: Promise<{ thread?: string }>;
 }) {
+  // Ahead of the thread redirect below, so an unapproved visitor is not
+  // handed a freshly minted conversation id they can never use.
+  await requireApproved("/dashboard/assistant");
+
   const { thread } = await searchParams;
 
   // The id reaches Postgres as a uuid column and LangGraph as a thread

@@ -24,6 +24,7 @@ import { GraphRecursionError } from "@langchain/langgraph";
 
 import { getAgentGraph } from "@/agents/graph";
 import { RECURSION_LIMIT } from "@/agents/nodes";
+import { requireApprovedApi } from "@/lib/auth/guard";
 import { chatService } from "@/lib/container";
 import { ApiError, toErrorResponse } from "@/lib/errors";
 import { chatRequestSchema } from "@/lib/schemas";
@@ -34,16 +35,22 @@ export const maxDuration = 300;
 
 export async function POST(request: Request) {
   try {
+    // Before the stream opens, so a rejection is a normal error response
+    // rather than a 200 whose body turns out to be an error event.
+    const viewer = await requireApprovedApi();
+
     const parsed = chatRequestSchema.safeParse(await request.json());
     if (!parsed.success) {
       throw new ApiError(422, parsed.error.issues[0].message);
     }
 
-    const { message, session_id, user_id } = parsed.data;
+    const { message, session_id } = parsed.data;
 
     // session bootstrap happens before the stream opens, so a DB failure
-    // surfaces as a normal error response rather than mid-stream
-    const sessionId = await chatService.ensureSession(session_id, user_id);
+    // surfaces as a normal error response rather than mid-stream.
+    // The signed-in user, not the request body's user_id — see the note
+    // in app/api/chat/route.ts.
+    const sessionId = await chatService.ensureSession(session_id, viewer.id);
     const graph = await getAgentGraph();
 
     const encoder = new TextEncoder();

@@ -17,6 +17,7 @@ import { NextResponse } from "next/server";
 
 import { loadAppConfig } from "@/lib/aws/app-config";
 import { searchService } from "@/lib/container";
+import { requireApprovedApi } from "@/lib/auth/guard";
 import { ApiError, toErrorResponse } from "@/lib/errors";
 import { searchRequestSchema, type SearchResponse } from "@/lib/schemas";
 
@@ -24,6 +25,10 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
+    // Every query embeds the search text through Azure OpenAI before it
+    // touches pgvector, so this endpoint bills per call.
+    await requireApprovedApi();
+
     const parsed = searchRequestSchema.safeParse(await request.json());
     if (!parsed.success) {
       throw new ApiError(422, parsed.error.issues[0].message);

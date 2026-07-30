@@ -32,6 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { requireApproved } from "@/lib/auth/guard";
 import { getLoggedPredictions, getPriceHistory } from "@/lib/api";
 import type { LoggedPrediction } from "@/lib/schemas";
 
@@ -99,6 +100,10 @@ export default async function ForecastsPage({
 }: {
   searchParams: Promise<{ id?: string }>;
 }) {
+  // Reading the log is free today, but this page is where user-initiated
+  // scoring is going to live, and model output is not public data.
+  await requireApproved("/dashboard/forecasts");
+
   const params = await searchParams;
   const { predictions, total } = await getLoggedPredictions(50);
 

@@ -17,6 +17,7 @@ import { PredictionRepository } from "@/repositories/prediction.repository";
 import { PriceRepository } from "@/repositories/price.repository";
 import { ProductRepository } from "@/repositories/product.repository";
 import { RegionRepository } from "@/repositories/region.repository";
+import { UserRepository } from "@/repositories/user.repository";
 import { WeatherRepository } from "@/repositories/weather.repository";
 import { YieldRepository } from "@/repositories/yield.repository";
 
@@ -42,6 +43,7 @@ const predictionRepo = new PredictionRepository();
 const weatherRepo = new WeatherRepository();
 const yieldRepo = new YieldRepository();
 const chatRepo = new ChatRepository();
+const userRepo = new UserRepository();
 
 // ── services ───────────────────────────────────────────────────
 const cropsService = new CropsService(cropRepo);
@@ -72,6 +74,7 @@ export const container = {
   weatherRepo,
   yieldRepo,
   chatRepo,
+  userRepo,
   cropsService,
   regionsService,
   pricesService,
@@ -87,6 +90,7 @@ export const container = {
 export type Container = typeof container;
 
 export {
+  userRepo,
   cropsService,
   regionsService,
   pricesService,

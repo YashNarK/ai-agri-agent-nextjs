@@ -23,9 +23,10 @@
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
 
+import { requireMcpToken } from "@/lib/auth/mcp-token";
 import { loadAppConfig } from "@/lib/aws/app-config";
 import { container } from "@/lib/container";
-import { ApiError } from "@/lib/errors";
+import { ApiError, toErrorResponse } from "@/lib/errors";
 import { parseDateOnly, toDateString } from "@/lib/serialize";
 
 export const runtime = "nodejs";
@@ -250,4 +251,23 @@ const handler = createMcpHandler(
   },
 );
 
-export { handler as GET, handler as POST, handler as DELETE };
+/**
+ * Every transport, behind the bearer token.
+ *
+ * Wrapping the handler rather than checking inside each tool: a tool
+ * added later would otherwise be unguarded until someone remembered,
+ * and "remembered" is not an access-control strategy.
+ */
+async function guarded(request: Request, context: unknown): Promise<Response> {
+  try {
+    requireMcpToken(request);
+  } catch (error) {
+    return toErrorResponse(error);
+  }
+  return (handler as (req: Request, ctx: unknown) => Promise<Response>)(
+    request,
+    context,
+  );
+}
+
+export { guarded as GET, guarded as POST, guarded as DELETE };

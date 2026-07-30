@@ -156,6 +156,53 @@ One thing that is deliberately NOT preserved: an answer still streaming when you
 navigate away. `AgriculturalAgent.run` aborts the graph on unsubscribe so
 abandoned runs stop costing Azure calls — the turn is cancelled, not resumed.
 
+## Identity and access
+
+Two independent gates, because they answer different questions:
+
+- **Authentication** — GitHub OAuth for everyone; an email/password provider
+  that only the configured admin can use. Auth.js v5, JWT sessions, no database
+  adapter (the credentials provider forces the JWT strategy, and this app's
+  Prisma client cannot exist at module load anyway — its connection string
+  arrives from Secrets Manager at runtime).
+- **Authorisation** — every account is created `pending` in `app_users` and can
+  reach nothing that spends money until the admin approves it at
+  `/dashboard/admin/users`.
+
+Signing in while unapproved succeeds and lands on `/pending-approval`. That is
+deliberate: refusing at the door shows a generic login error, which reads as a
+broken account rather than a waiting one.
+
+**Guarded** (these call Azure OpenAI or Azure ML): `/dashboard/assistant`,
+`/knowledge`, `/forecasts`; `/api/chat`, `/api/chatstream`, `/api/copilotkit/*`,
+`/api/search`, `/api/predictions`. **Public**: the rest of the dashboard and the
+plain CRUD endpoints over our own database.
+
+`/api/mcp/*` is guarded too, by a bearer token (`$MCP_API_TOKEN`) rather than a
+cookie — its clients are other AI systems, not browsers. It exposes the same
+prediction and search tools as the REST routes, so leaving it open would have
+made the other guards decorative. **An unset token closes the endpoint** rather
+than opening it.
+
+`proxy.ts` (not `middleware.ts` — renamed in Next 16) only redirects browsers
+that have no session cookie. It is a convenience, not a boundary: the real
+checks are in `lib/auth/guard.ts`, close to the data.
+
+Role and status are re-read from the database when a token's copy is over a
+minute old, so approving or revoking someone takes effect without them signing
+out. The cost of that design is a window of up to 60 seconds where a revoked
+user still has access.
+
+Two configuration notes that will bite otherwise:
+
+- `ADMIN_PASSWORD_HASH` is stored **base64-encoded**. Next.js expands `$VAR` in
+  `.env` files, and a raw bcrypt hash (`$2b$12$…`) is silently truncated — but
+  only locally, since platform-set variables on Vercel are never expanded. Use
+  `npm run hash:password -- '<password>'`, which emits the encoded form.
+- The admin is matched from configuration (`ADMIN_GITHUB_LOGIN`, `ADMIN_EMAIL`),
+  not a database flag, because the first admin cannot come from an approval
+  queue that only an admin can service.
+
 ## Not ported
 
 These stay in the Python repo — they are offline ML tooling, not app logic:

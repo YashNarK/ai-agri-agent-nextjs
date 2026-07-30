@@ -13,6 +13,7 @@
 
 import { NextResponse } from "next/server";
 
+import { requireApprovedApi } from "@/lib/auth/guard";
 import { chatService } from "@/lib/container";
 import { toErrorResponse } from "@/lib/errors";
 
@@ -26,8 +27,11 @@ export async function GET(
   { params }: { params: Promise<{ session_id: string }> },
 ) {
   try {
+    const viewer = await requireApprovedApi();
     const { session_id } = await params;
-    return NextResponse.json(await chatService.getTranscript(session_id));
+    return NextResponse.json(
+      await chatService.getTranscript(session_id, viewer.id),
+    );
   } catch (error) {
     return toErrorResponse(error);
   }

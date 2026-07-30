@@ -21,7 +21,16 @@ const LINKS = [
   { href: "/dashboard/assistant", label: "Assistant" },
 ];
 
-export function SiteNav() {
+/**
+ * `authMenu` arrives as a prop rather than being imported here.
+ *
+ * This component is a Client Component (it needs usePathname for the
+ * active-route highlight), and a Client Component cannot render a
+ * Server Component it imports. Passing the already-rendered element
+ * through from the server layout is the supported interleaving, and it
+ * keeps the session off the client bundle entirely.
+ */
+export function SiteNav({ authMenu }: { authMenu?: React.ReactNode }) {
   const pathname = usePathname();
 
   return (
@@ -57,6 +66,7 @@ export function SiteNav() {
           })}
         </nav>
 
+        {authMenu}
         <ModeToggle />
       </div>
     </header>

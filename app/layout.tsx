@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Suspense } from "react";
 
+import { AuthMenu } from "@/components/auth-menu";
 import { SiteNav } from "@/components/site-nav";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
@@ -48,7 +50,18 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <SiteNav />
+          {/*
+            Suspense so resolving the session — which may read the
+            database in the jwt callback — does not hold back the first
+            streamed chunk of every page, as the auth guide warns.
+          */}
+          <SiteNav
+            authMenu={
+              <Suspense fallback={null}>
+                <AuthMenu />
+              </Suspense>
+            }
+          />
           <main className="flex-1">{children}</main>
           <Toaster />
         </ThemeProvider>

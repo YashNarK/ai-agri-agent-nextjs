@@ -215,3 +215,69 @@ model weather_data {
   @@index([region_id, weather_date(sort: Desc)], map: "idx_weather_region_date")
   @@schema("agricultural")
 }
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model app_users {
+  id            String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  email         String?   @db.VarChar(320)
+  github_login  String?   @db.VarChar(100)
+  name          String?   @db.VarChar(200)
+  image         String?
+  password_hash String?   @db.VarChar(255)
+  role          String    @default("user") @db.VarChar(20)
+  status        String    @default("pending") @db.VarChar(20)
+  created_at    DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime  @default(now()) @db.Timestamptz(6)
+  last_login_at DateTime? @db.Timestamptz(6)
+  approved_at   DateTime? @db.Timestamptz(6)
+  approved_by   String?   @db.Uuid
+
+  @@index([status, created_at(sort: Desc)], map: "idx_app_users_status")
+  @@schema("agricultural")
+}
+
+model checkpoint_blobs {
+  thread_id     String
+  checkpoint_ns String @default("")
+  channel       String
+  version       String
+  type          String
+  blob          Bytes?
+
+  @@id([thread_id, checkpoint_ns, channel, version])
+  @@schema("public")
+}
+
+model checkpoint_migrations {
+  v Int @id
+
+  @@schema("public")
+}
+
+model checkpoint_writes {
+  thread_id     String
+  checkpoint_ns String  @default("")
+  checkpoint_id String
+  task_id       String
+  idx           Int
+  channel       String
+  type          String?
+  blob          Bytes
+
+  @@id([thread_id, checkpoint_ns, checkpoint_id, task_id, idx])
+  @@schema("public")
+}
+
+model checkpoints {
+  thread_id            String
+  checkpoint_ns        String  @default("")
+  checkpoint_id        String
+  parent_checkpoint_id String?
+  type                 String?
+  checkpoint           Json
+  metadata             Json    @default("{}")
+
+  @@id([thread_id, checkpoint_ns, checkpoint_id])
+  @@schema("public")
+}

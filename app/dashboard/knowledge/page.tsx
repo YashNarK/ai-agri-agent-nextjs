@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { requireApproved } from "@/lib/auth/guard";
 import { getCrops, searchKnowledge } from "@/lib/api";
 
 import { SearchForm } from "./search-form";
@@ -119,6 +120,11 @@ export default async function KnowledgePage({
 }: {
   searchParams: Promise<{ q?: string; crop?: string }>;
 }) {
+  // Before anything is read: this page embeds the query through Azure
+  // OpenAI. proxy.ts already redirects visitors with no session cookie,
+  // but that check is optimistic and never sees approval status.
+  await requireApproved("/dashboard/knowledge");
+
   const params = await searchParams;
   const query = params.q?.trim() ?? "";
   const crops = await getCrops();

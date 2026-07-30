@@ -12,7 +12,8 @@
     "sql": "tsx scripts/sql-runner.ts",
     "db:schema": "tsx scripts/sql-runner.ts sql",
     "db:pull": "prisma db pull && prisma generate",
-    "seed:embeddings": "tsx scripts/seed-embeddings.ts"
+    "seed:embeddings": "tsx scripts/seed-embeddings.ts",
+    "hash:password": "tsx scripts/hash-password.ts"
   },
   "dependencies": {
     "@ag-ui/client": "^0.0.57",
@@ -31,6 +32,7 @@
     "@neondatabase/serverless": "^1.1.0",
     "@prisma/adapter-neon": "^7.9.1",
     "@prisma/client": "^7.9.1",
+    "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -48,11 +50,13 @@
     "lucide-react": "^1.27.0",
     "mcp-handler": "^1.1.0",
     "next": "16.2.12",
+    "next-auth": "^5.0.0-beta.32",
     "next-themes": "^0.4.6",
     "prisma": "^7.9.1",
     "react": "19.2.4",
     "react-day-picker": "^10.0.1",
     "react-dom": "19.2.4",
+    "server-only": "^0.0.1",
     "shadcn": "^4.16.0",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",

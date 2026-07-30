@@ -20,6 +20,7 @@
 
 import { NextResponse } from "next/server";
 
+import { requireApprovedApi } from "@/lib/auth/guard";
 import { loadAppConfig } from "@/lib/aws/app-config";
 import { predictionsService } from "@/lib/container";
 import { ApiError, toErrorResponse } from "@/lib/errors";
@@ -42,6 +43,12 @@ export const runtime = "nodejs";
  */
 export async function GET(request: Request) {
   try {
+    // Guarded despite being free to serve: a forecast log is this
+    // platform's model output, and listing it reveals what has been
+    // predicted for whom. The cost asymmetry with POST is real, but it
+    // is not a reason to make the history public.
+    await requireApprovedApi();
+
     const { searchParams } = new URL(request.url);
 
     const parsed = predictionListQuerySchema.safeParse({
@@ -69,6 +76,10 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    // This is the expensive one — every call scores against the Azure ML
+    // managed endpoint.
+    await requireApprovedApi();
+
     const parsed = predictionRequestSchema.safeParse(await request.json());
     if (!parsed.success) {
       throw new ApiError(422, parsed.error.issues[0].message);
