@@ -16,6 +16,7 @@ import { signOut } from "@/auth";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { getViewer } from "@/lib/auth/guard";
+import { cn } from "@/lib/utils";
 
 export async function AuthMenu() {
   const viewer = await getViewer();
@@ -40,10 +41,17 @@ export async function AuthMenu() {
 
   return (
     <div className="flex items-center gap-2">
+      {/* Admin-only, and md-and-up only. It is a navigation destination,
+          so on a phone it belongs in the menu sheet with the other
+          links rather than competing with the brand for the one row —
+          it was what forced the app name down to "Agricult…". */}
       {viewer.role === "admin" && (
         <Link
           href="/dashboard/admin/users"
-          className={buttonVariants({ size: "sm", variant: "ghost" })}
+          className={cn(
+            buttonVariants({ size: "sm", variant: "ghost" }),
+            "hidden md:inline-flex",
+          )}
         >
           Requests
         </Link>

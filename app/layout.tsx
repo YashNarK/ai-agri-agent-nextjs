@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { IBM_Plex_Sans, JetBrains_Mono, Space_Grotesk } from "next/font/google";
 import { Suspense } from "react";
 
+import { AdminNavLink } from "@/components/admin-nav-link";
 import { AuthMenu } from "@/components/auth-menu";
 import { SiteNav } from "@/components/site-nav";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -88,6 +89,11 @@ export default function RootLayout({
             authMenu={
               <Suspense fallback={null}>
                 <AuthMenu />
+              </Suspense>
+            }
+            menuExtra={
+              <Suspense fallback={null}>
+                <AdminNavLink />
               </Suspense>
             }
           />

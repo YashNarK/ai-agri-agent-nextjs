@@ -38,14 +38,32 @@ const LABEL_STYLE: React.CSSProperties = {
   fontVariantNumeric: "tabular-nums",
 };
 
+/**
+ * Roughly the width one x-axis label needs before its neighbour starts
+ * touching it. Sized for the longest thing we print down there — a
+ * month-and-year stamp like "Jan 2026" at 11px.
+ */
+const MIN_TICK_SPACING = 78;
+
 /** Horizontal axis with ticks along the bottom of the plot. */
 export function AxisBottom({
   scale,
+  innerWidth,
   innerHeight,
   tickCount = 6,
   format,
 }: AxisProps) {
-  const ticks = (scale.ticks?.(tickCount) ?? scale.domain()) as never[];
+  // Ask for fewer ticks when there is no room for them.
+  //
+  // `tickCount` is a request, not a promise — d3 returns a nice round
+  // interval near it — but six date labels in a 330px plot overlapped
+  // into an unreadable smear on a phone. Deriving a ceiling from the
+  // actual plot width means the same chart thins its axis as it narrows,
+  // rather than every caller hard-coding a number that only suits a
+  // desktop. Never below two, or the axis stops conveying a range.
+  const affordable = Math.max(2, Math.floor(innerWidth / MIN_TICK_SPACING));
+  const ticks = (scale.ticks?.(Math.min(tickCount, affordable)) ??
+    scale.domain()) as never[];
   const offset = scale.bandwidth ? scale.bandwidth() / 2 : 0;
 
   return (

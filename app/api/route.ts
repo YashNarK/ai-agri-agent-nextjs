@@ -15,6 +15,7 @@ export async function GET() {
   return NextResponse.json({
     app: settings.APP_NAME,
     version: settings.APP_VERSION,
+    docs: "/docs",
     mcp: "/api/mcp/mcp",
     mcp_docs: "/docs-mcp",
     endpoints: {

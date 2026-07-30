@@ -55,12 +55,29 @@ export function SearchForm({
         onChange={(e) => setValue(e.target.value)}
         placeholder="Ask about pests, soil, irrigation…"
         aria-label="Search the knowledge base"
-        className="min-w-[240px] flex-1"
+        // min-w on a 390px screen forced the row wider than the viewport;
+        // basis-full lets it take its own line on a phone instead.
+        className="w-full flex-1 sm:min-w-[240px]"
       />
 
       <Select value={crop} onValueChange={(v) => v && setCrop(v)}>
-        <SelectTrigger className="w-[180px]" aria-label="Filter by crop">
-          <SelectValue />
+        <SelectTrigger
+          className="w-full sm:w-[180px]"
+          aria-label="Filter by crop"
+        >
+          {/*
+            Rendered explicitly rather than letting SelectValue print the
+            raw value. Base UI does not resolve a value back to its item's
+            label on its own, so the trigger read "__all__" — the sentinel
+            was leaking straight into the UI.
+          */}
+          <SelectValue>
+            {(value) =>
+              value === ALL_CROPS
+                ? "All crops"
+                : (crops.find((c) => c.code === value)?.name ?? String(value))
+            }
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={ALL_CROPS}>All crops</SelectItem>

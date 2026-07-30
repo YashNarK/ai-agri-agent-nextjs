@@ -31,15 +31,33 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
-const LINKS = [
+/** Plain reads of our own database. No model, no external call. */
+const DATA_LINKS = [
   { href: "/dashboard", label: "Overview" },
   { href: "/dashboard/prices", label: "Prices" },
-  { href: "/dashboard/forecasts", label: "Forecasts" },
   { href: "/dashboard/crops", label: "Crops" },
   { href: "/dashboard/regions", label: "Regions" },
+];
+
+/**
+ * The three surfaces backed by a model — Azure ML for forecasts, Azure
+ * OpenAI embeddings for knowledge search, the LangGraph agent for chat.
+ *
+ * Grouped and marked deliberately: these are exactly the routes that
+ * cost money per request and sit behind the approval gate, so the set a
+ * user sees highlighted is the same set the guards protect. The visual
+ * grouping is not decoration — it tells you which parts of the app are
+ * doing inference.
+ */
+const AI_LINKS = [
+  { href: "/dashboard/forecasts", label: "Forecasts" },
   { href: "/dashboard/knowledge", label: "Knowledge" },
   { href: "/dashboard/assistant", label: "Assistant" },
 ];
+
+/** Neon edge shared by both layouts, so the two cannot drift apart. */
+const AI_GROUP_FRAME =
+  "rounded-xl border border-emerald-400/45 bg-emerald-400/[0.06] shadow-[0_0_12px_-3px_rgb(52_211_153/0.55)]";
 
 /** Exact match for the index, prefix match for sections, so /dashboard
  *  does not stay lit on every child route. */
@@ -47,6 +65,23 @@ function isActive(href: string, pathname: string) {
   return href === "/dashboard"
     ? pathname === "/dashboard"
     : pathname.startsWith(href);
+}
+
+/** Four-point sparkle — the conventional "this is model-backed" mark. */
+function AiSparkIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <path
+        d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3Z"
+        fill="currentColor"
+      />
+      <path
+        d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"
+        fill="currentColor"
+        opacity="0.7"
+      />
+    </svg>
+  );
 }
 
 function MenuIcon() {
@@ -71,7 +106,15 @@ function MenuIcon() {
  * through from the server layout is the supported interleaving, and it
  * keeps the session off the client bundle entirely.
  */
-export function SiteNav({ authMenu }: { authMenu?: React.ReactNode }) {
+export function SiteNav({
+  authMenu,
+  menuExtra,
+}: {
+  authMenu?: React.ReactNode;
+  /** Rendered at the end of the mobile menu — admin-only destinations
+   *  that have no room in the top bar at phone width. */
+  menuExtra?: React.ReactNode;
+}) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [seenPath, setSeenPath] = useState(pathname);
@@ -111,7 +154,7 @@ export function SiteNav({ authMenu }: { authMenu?: React.ReactNode }) {
               <SheetTitle>Navigate</SheetTitle>
             </SheetHeader>
             <nav className="flex flex-col gap-1 px-2 pb-4">
-              {LINKS.map((link) => {
+              {DATA_LINKS.map((link) => {
                 const active = isActive(link.href, pathname);
                 return (
                   <Link
@@ -129,6 +172,39 @@ export function SiteNav({ authMenu }: { authMenu?: React.ReactNode }) {
                   </Link>
                 );
               })}
+              {menuExtra}
+
+              {/* The model-backed group, at the end on a phone. */}
+              <div
+                className={cn("mt-3 flex flex-col gap-1 p-2", AI_GROUP_FRAME)}
+                aria-labelledby="ai-group-heading-mobile"
+              >
+                <p
+                  id="ai-group-heading-mobile"
+                  className="flex items-center gap-1.5 px-1 pb-1 text-[11px] font-medium tracking-[0.08em] text-emerald-500 uppercase dark:text-emerald-400"
+                >
+                  <AiSparkIcon className="size-3.5" />
+                  AI features
+                </p>
+                {AI_LINKS.map((link) => {
+                  const active = isActive(link.href, pathname);
+                  return (
+                    <Link
+                      key={link.href}
+                      href={link.href}
+                      aria-current={active ? "page" : undefined}
+                      className={cn(
+                        "rounded-md px-3 py-2 text-sm transition-colors",
+                        active
+                          ? "bg-emerald-400/15 text-foreground"
+                          : "text-muted-foreground hover:bg-emerald-400/10 hover:text-foreground",
+                      )}
+                    >
+                      {link.label}
+                    </Link>
+                  );
+                })}
+              </div>
             </nav>
           </SheetContent>
         </Sheet>
@@ -143,7 +219,7 @@ export function SiteNav({ authMenu }: { authMenu?: React.ReactNode }) {
         {/* The inline strip, from md up. Hidden rather than squeezed on
             phones — see the note at the top of this file. */}
         <nav className="hidden min-w-0 flex-1 items-center gap-1 md:flex">
-          {LINKS.map((link) => {
+          {DATA_LINKS.map((link) => {
             const active = isActive(link.href, pathname);
             return (
               <Link
@@ -161,6 +237,37 @@ export function SiteNav({ authMenu }: { authMenu?: React.ReactNode }) {
               </Link>
             );
           })}
+
+          {/* ml-auto pushes the model-backed group to the right end of
+              the strip, so it reads as its own region rather than the
+              tail of the same list. */}
+          <div
+            className={cn("ml-auto flex items-center gap-0.5 py-0.5 pr-1 pl-2", AI_GROUP_FRAME)}
+          >
+            <AiSparkIcon
+              className="size-3.5 shrink-0 text-emerald-500 dark:text-emerald-400"
+              aria-hidden="true"
+            />
+            <span className="sr-only">AI features:</span>
+            {AI_LINKS.map((link) => {
+              const active = isActive(link.href, pathname);
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "rounded-lg px-2.5 py-1 text-sm whitespace-nowrap transition-colors",
+                    active
+                      ? "bg-emerald-400/15 text-foreground"
+                      : "text-muted-foreground hover:bg-emerald-400/10 hover:text-foreground",
+                  )}
+                >
+                  {link.label}
+                </Link>
+              );
+            })}
+          </div>
         </nav>
 
         <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2 md:ml-0">
