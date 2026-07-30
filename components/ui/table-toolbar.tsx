@@ -58,21 +58,35 @@ export function TableSearch({
   const urlValue = searchParams.get(paramName) ?? "";
   const [value, setValue] = useState(urlValue);
   const [seenUrlValue, setSeenUrlValue] = useState(urlValue);
+  /**
+   * Whether the caret is in this box.
+   *
+   * This is the guard that makes the URL→input sync safe. The debounced
+   * write lands asynchronously and writes can land OUT OF ORDER, so any
+   * rule based on "was this value one we sent?" is defeated by a stale
+   * echo arriving late: typing "cotton", clearing, then retyping fast
+   * produced "cotcotton", and a late clear could blank the box while the
+   * filter stayed applied.
+   *
+   * Focus settles it without any ordering assumptions — while the user
+   * is typing, their text wins, full stop. The URL is adopted only once
+   * they have left the field, which is when a back navigation or an
+   * external link should be reflected.
+   */
+  const [isFocused, setIsFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const wasFocused = useRef(false);
 
-  // Adopt the URL when it changes from OUTSIDE this input — a back
-  // navigation, or a link that clears the filter.
+  // Adopt the URL only when it changed while the user was NOT editing.
   //
   // Adjusted during render rather than in an effect: setting state in an
   // effect renders once with the stale value and then again with the
   // new one, which is both a wasted pass and a visible flash. React
   // re-runs this component immediately instead, before committing
-  // anything. Guarded by the previous URL value so it is not an infinite
-  // loop.
+  // anything. Guarded by the previous URL value so it is not a loop.
   if (urlValue !== seenUrlValue) {
     setSeenUrlValue(urlValue);
-    setValue(urlValue);
+    if (!isFocused) setValue(urlValue);
   }
 
   useEffect(() => {
@@ -118,6 +132,10 @@ export function TableSearch({
         ref={inputRef}
         type="search"
         value={value}
+        onFocus={() => {
+          wasFocused.current = true;
+          setIsFocused(true);
+        }}
         onChange={(event) => {
           // Typing (or hitting the native ✕) means the caret is here, so
           // remember it — the re-render this triggers must not lose it.
@@ -126,6 +144,11 @@ export function TableSearch({
         }}
         onBlur={() => {
           wasFocused.current = false;
+          // Leaving the field re-opens the door to URL syncing, and
+          // catches up immediately so the box never disagrees with the
+          // results it is filtering.
+          setIsFocused(false);
+          setValue(searchParams.get(paramName) ?? "");
         }}
         placeholder={placeholder}
         aria-label={placeholder}

@@ -180,7 +180,22 @@ export function AssistantChat({ threadId }: { threadId: string }) {
           // nothing is worse than no control: it reads as broken rather
           // than absent. `input` is a slot, so overriding this one child
           // leaves the rest of the composer untouched.
-          input={{ addMenuButton: () => null }}
+          //
+          // `sendButton` gets an accessible name for the same reason it
+          // needed finding: it ships as a bare icon, so axe flags it
+          // "button-name" (critical) and a screen reader announces only
+          // "button". Slots accept partial props, so naming it is a
+          // one-line override rather than a fork of the component.
+          input={{
+            addMenuButton: () => null,
+            sendButton: { "aria-label": "Send message" },
+          }}
+          // Same treatment for the per-message actions.
+          messageView={{
+            assistantMessage: {
+              copyButton: { "aria-label": "Copy this reply" },
+            },
+          }}
         />
       </div>
     </div>
