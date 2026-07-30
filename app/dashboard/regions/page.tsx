@@ -1,6 +1,6 @@
-﻿// ============================================================
+// ============================================================
 // app/dashboard/regions/page.tsx
-// Region index â€” every region as a card linking to its detail page.
+// Region index — every region as a card linking to its detail page.
 // ============================================================
 
 import Link from "next/link";
@@ -41,7 +41,7 @@ export default async function RegionsPage() {
           <CardDescription>
             Plotted from stored coordinates on an orthographic globe, so
             shapes and areas are undistorted. Drag to rotate. Country
-            outlines are there for orientation only â€” the database holds
+            outlines are there for orientation only — the database holds
             points, not country-level measures, so nothing is shaded by
             value.
           </CardDescription>
@@ -67,7 +67,7 @@ export default async function RegionsPage() {
                   )}
                 </div>
                 <CardDescription>
-                  {region.country} Â· {region.code}
+                  {region.country} · {region.code}
                 </CardDescription>
               </CardHeader>
             </Card>

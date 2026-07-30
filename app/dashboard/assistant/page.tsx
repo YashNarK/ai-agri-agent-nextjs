@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 // app/dashboard/assistant/page.tsx
 //
 // The chat page: a conversation switcher beside the chat surface.
@@ -6,7 +6,7 @@
 // The conversation is identified by `?thread=<uuid>` in the URL. That is
 // why a conversation survives at all: a value held in React state died
 // with the component, whereas the URL survives navigation, reload,
-// back/forward and a shared link â€” and it makes switching threads plain
+// back/forward and a shared link — and it makes switching threads plain
 // navigation rather than client state. A visit without one is redirected
 // to a freshly minted thread, so the address bar always names the
 // conversation on screen.
@@ -22,7 +22,7 @@ import { chatService } from "@/lib/container";
 import { ConversationList } from "./conversation-list";
 
 export const metadata = {
-  title: "Assistant â€” Agricultural Intelligence",
+  title: "Assistant — Agricultural Intelligence",
 };
 
 export const dynamic = "force-dynamic";
@@ -52,7 +52,7 @@ export default async function AssistantPage({
   const conversations = await chatService.listConversations(viewer.id);
 
   // A well-formed id that belongs to someone else must not even render.
-  // The agent refuses it too, but only once a message is sent â€” by then
+  // The agent refuses it too, but only once a message is sent — by then
   // the user is staring at what looks like a working empty chat.
   const foreign =
     !conversations.some((conversation) => conversation.id === thread) &&
@@ -67,7 +67,7 @@ export default async function AssistantPage({
         <h1 className="text-2xl font-semibold tracking-tight">Assistant</h1>
         <p className="text-sm text-muted-foreground">
           Asks the same database the dashboard reads. Every figure it quotes
-          comes from a tool call shown inline â€” nothing is recalled from the
+          comes from a tool call shown inline — nothing is recalled from the
           model&apos;s memory.
         </p>
       </header>
