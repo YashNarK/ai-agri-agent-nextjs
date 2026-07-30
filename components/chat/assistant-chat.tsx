@@ -173,6 +173,14 @@ export function AssistantChat({ threadId }: { threadId: string }) {
             chatInputPlaceholder:
               "Ask about prices, forecasts, weather or agronomy…",
           }}
+          // The composer renders an "add" (+) button by default, which
+          // opens the attachment/tools menu. Attachments are opt-in via
+          // an `attachments` prop we never pass, and we register no tools
+          // menu — so the button opened nothing. A control that does
+          // nothing is worse than no control: it reads as broken rather
+          // than absent. `input` is a slot, so overriding this one child
+          // leaves the rest of the composer untouched.
+          input={{ addMenuButton: () => null }}
         />
       </div>
     </div>

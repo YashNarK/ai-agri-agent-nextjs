@@ -227,6 +227,28 @@
     font-family: var(--font-heading), var(--font-body), sans-serif;
     letter-spacing: -0.011em;
   }
+  /* CopilotKit's composer sizes itself from a ONE-TIME measurement: it
+     reads the empty textarea's scrollHeight at mount, derives a
+     five-line max from it, and then pins `style.height` to
+     min(scrollHeight, maxHeight).
+
+     That measurement goes stale if the text metrics change afterwards,
+     and ours do twice over — the textarea carries `font: inherit`, so it
+     picks up this app's type scale, and the webfont loads with
+     `display: swap`, so the line box grows a pixel or two once IBM Plex
+     replaces the fallback. Height stays at the old value, scrollHeight
+     grows past it, and an empty input shows a scrollbar.
+
+     Pinning font-size and line-height to fixed values here decouples the
+     composer from the app's type scale, and the min-height floor absorbs
+     the swap: a floor beats an inline `height`, so a slightly-too-short
+     measurement can no longer clip the line. */
+  [data-copilotkit] textarea {
+    font-size: 1rem;
+    line-height: 1.5;
+    min-height: calc(1.5rem + 4px);
+  }
+
   /* Scrollable without the bar — for strips like the nav that must stay
      reachable on narrow screens without a scrollbar cutting across the
      chrome. Content is still keyboard- and touch-scrollable. */
