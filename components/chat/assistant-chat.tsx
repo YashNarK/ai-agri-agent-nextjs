@@ -13,6 +13,13 @@
 // transcript — the same thing the REST /api/chat route does with its
 // session_id. It used to be minted per mount, which meant leaving the
 // page and coming back silently started a different conversation.
+//
+// Returning to a thread replays what is in the DATABASE, not a run in
+// progress: a run is bound to the connection that started it and is
+// aborted when this component unmounts, so an unfinished turn is lost
+// rather than resumed. RunNavigationGuard below exists to keep the user
+// here until the turn commits; see its header for why that is a stopgap
+// and what replaces it.
 // ============================================================
 
 import {
@@ -25,9 +32,47 @@ import { useEffect, useRef } from "react";
 
 import type { AgentUiState } from "@/agents/agui-agent";
 import { seriesColor } from "@/components/charts/theme";
+import { RunNavigationGuard } from "@/components/chat/run-navigation-guard";
 import type { TranscriptResponse } from "@/lib/schemas";
 
 const AGENT_ID = "agricultural";
+
+/**
+ * Says out loud that leaving now would cancel the answer.
+ *
+ * The pairing matters: RunNavigationGuard blocks the ways off the page,
+ * and a block with no prior warning reads as the app being broken. This
+ * is the warning; the toast is only the reminder for someone who tried
+ * anyway.
+ *
+ * The text collapses to a dot plus "Answering…" on phones, where the
+ * header shares one line with the tool-budget readout.
+ */
+function RunNotice() {
+  const { agent } = useAgent({
+    agentId: AGENT_ID,
+    updates: [UseAgentUpdate.OnRunStatusChanged],
+  });
+
+  if (!agent.isRunning) return null;
+
+  return (
+    <span
+      role="status"
+      className="flex items-center gap-1.5 text-xs text-muted-foreground"
+    >
+      <span
+        className="size-1.5 shrink-0 animate-pulse rounded-full bg-amber-500"
+        aria-hidden
+      />
+      <span>
+        Answering
+        <span className="hidden sm:inline"> — stay on this page until it finishes</span>
+        <span className="sm:hidden">…</span>
+      </span>
+    </span>
+  );
+}
 
 /**
  * Shows how much of the agent's per-turn tool budget this turn has used.
@@ -161,9 +206,15 @@ export function AssistantChat({ threadId }: { threadId: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b px-4 py-2">
+      <RunNavigationGuard />
+      {/* wraps rather than overflowing: on a narrow phone the title, the
+          run notice and the budget pips do not fit on one line */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b px-4 py-2">
         <span className="text-sm font-medium">Agricultural assistant</span>
-        <WorkBudget />
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <RunNotice />
+          <WorkBudget />
+        </div>
       </div>
       <div className="min-h-0 flex-1">
         <CopilotChat

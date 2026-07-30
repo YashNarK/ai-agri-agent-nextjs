@@ -26,6 +26,23 @@
 // text message has to be closed the moment a tool starts. Everything
 // tracked in `openTextMessageId` exists to keep that bracketing honest;
 // an unclosed message leaves the client spinning forever.
+//
+// THE RUN IS OWNED BY THE CONNECTION, NOT BY THE SERVER
+//
+// run() aborts the graph when its observable is unsubscribed, and the
+// persist below is skipped on an aborted run — so a user who navigates
+// away mid-answer loses the turn outright rather than backgrounding it.
+// The LangGraph checkpoint does not rescue it either: checkpoints are
+// written at superstep boundaries, and streamed tokens belong to a node
+// that has not returned yet.
+//
+// That is deliberate for now (an orphaned run keeps billing Azure with
+// nobody reading it) but it is NOT the behaviour users expect from a
+// chat app. The fix is to decouple the two: write deltas to a durable
+// buffer keyed by run id and let the browser re-attach to it, which
+// needs an execution home that outlives the request. Until then
+// components/chat/run-navigation-guard.tsx warns the user on the way
+// out.
 // ============================================================
 
 import { AbstractAgent } from "@ag-ui/client";
@@ -98,13 +115,18 @@ function latestUserText(messages: Message[]): string {
 /**
  * Rebuilds LangChain history from the client's message list.
  *
- * Only used when the graph's checkpoint for this thread is empty. The
- * checkpointer is a MemorySaver, so a server restart wipes history the
- * browser still has; without this the agent would answer a follow-up
- * with no idea what came before, which reads as amnesia rather than as
- * the restart it actually is. Tool messages are deliberately dropped —
- * replaying them without their originating tool_calls would produce an
- * invalid message sequence.
+ * Only used when the graph's checkpoint for this thread is empty. That
+ * is now a narrow case: the checkpointer is a PostgresSaver shared by
+ * every instance (see agents/graph.ts), so restarts and cold starts no
+ * longer lose history the way the old MemorySaver did. What remains is
+ * a turn that was ABORTED before its first superstep committed — the
+ * user left the page mid-answer — plus threads whose checkpoint rows
+ * were pruned. In both the browser still holds a transcript the graph
+ * does not, and without this the agent would answer a follow-up with no
+ * idea what came before.
+ *
+ * Tool messages are deliberately dropped — replaying them without their
+ * originating tool_calls would produce an invalid message sequence.
  */
 function seedHistory(messages: Message[]): BaseMessage[] {
   const history: BaseMessage[] = [];

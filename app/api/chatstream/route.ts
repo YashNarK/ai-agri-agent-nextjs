@@ -14,7 +14,12 @@
 //
 // The same work-budget guardrail as /api/chat applies, so broad questions
 // stay bounded and terminate cleanly. Session and messages are persisted
-// to PostgreSQL just like the non-streaming route.
+// to PostgreSQL just like the non-streaming route — but only once, after
+// the graph finishes. A client that disconnects mid-stream therefore
+// leaves nothing in chat_messages, and nothing in the checkpointer either
+// unless a superstep happened to commit first. This route is the REST
+// surface, not what the chat UI talks to; the same limitation on the UI's
+// path is documented in agents/agui-agent.ts.
 //
 // Port of routers/chat.py (chat_stream)
 // ============================================================
