@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Agricultural Intelligence">
+  <!--
+    A sprout whose leaf tips are nodes: agriculture meeting inference,
+    which is what this app is. Drawn for the size it will actually be
+    seen at — one stem, two leaves, three dots, heavy strokes. Anything
+    finer turns to mush at 16px, which is where a favicon lives most of
+    its life.
+
+    Emerald matches the AI group in the navigation, so the tab icon and
+    the in-app marker for "this is model-backed" are the same colour.
+  -->
+  <rect width="64" height="64" rx="14" fill="#064e3b"/>
+
+  <!-- stem -->
+  <path d="M32 50 V30"
+        stroke="#6ee7b7" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- leaves, as two arcs springing off the stem -->
+  <path d="M32 34 C32 24 25 19 17 19 C17 28 23 34 32 34 Z" fill="#34d399"/>
+  <path d="M32 30 C32 21 39 15 47 15 C47 24 41 30 32 30 Z" fill="#10b981"/>
+
+  <!-- nodes at the tips and the crown -->
+  <circle cx="17" cy="19" r="4.5" fill="#a7f3d0"/>
+  <circle cx="47" cy="15" r="4.5" fill="#a7f3d0"/>
+  <circle cx="32" cy="27" r="3.5" fill="#ecfdf5"/>
+</svg>

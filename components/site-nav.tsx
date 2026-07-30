@@ -84,6 +84,32 @@ function AiSparkIcon({ className }: { className?: string }) {
   );
 }
 
+/**
+ * Closed padlock — these routes are behind the approval gate.
+ *
+ * Paired with the sparkle rather than replacing it because the two say
+ * different things: the sparkle is "a model runs here", the lock is
+ * "and you need to be approved to run it". They happen to cover the
+ * same three routes, and that is not a coincidence — the gate exists
+ * because inference costs money.
+ */
+function LockIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <rect
+        x="5" y="10.5" width="14" height="10" rx="2.5"
+        fill="currentColor"
+      />
+      <path
+        d="M8.5 10.5V7.75a3.5 3.5 0 1 1 7 0v2.75"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 function MenuIcon() {
   return (
     <svg viewBox="0 0 24 24" className="size-5" fill="none" aria-hidden="true">
@@ -131,6 +157,19 @@ export function SiteNav({
     setOpen(false);
   }
 
+  /**
+   * Close on tap, not on arrival.
+   *
+   * The pathname check above is a safety net for back/forward; it is
+   * the WRONG thing to close the menu on when the user taps a link. A
+   * guarded route has to reach the server, resolve the session and
+   * render — or redirect to /login — before `pathname` changes, so the
+   * sheet sat open and unhighlighted for the whole round trip and the
+   * tap felt ignored. Closing in the click handler makes the response
+   * immediate and independent of how slow the destination is.
+   */
+  const close = () => setOpen(false);
+
   return (
     <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur">
       <div className="mx-auto flex h-14 w-full max-w-[88rem] items-center gap-3 px-4 sm:gap-4 sm:px-6">
@@ -160,9 +199,10 @@ export function SiteNav({
                   <Link
                     key={link.href}
                     href={link.href}
+                    onClick={close}
                     aria-current={active ? "page" : undefined}
                     className={cn(
-                      "rounded-md px-3 py-2 text-sm transition-colors",
+                      "rounded-md px-3 py-2 text-sm transition-colors active:bg-secondary",
                       active
                         ? "bg-secondary text-secondary-foreground"
                         : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground",
@@ -172,7 +212,7 @@ export function SiteNav({
                   </Link>
                 );
               })}
-              {menuExtra}
+              <div onClick={close}>{menuExtra}</div>
 
               {/* The model-backed group, at the end on a phone. */}
               <div
@@ -185,6 +225,8 @@ export function SiteNav({
                 >
                   <AiSparkIcon className="size-3.5" />
                   AI features
+                  <LockIcon className="size-3" />
+                  <span className="sr-only">— sign-in and approval required</span>
                 </p>
                 {AI_LINKS.map((link) => {
                   const active = isActive(link.href, pathname);
@@ -192,9 +234,10 @@ export function SiteNav({
                     <Link
                       key={link.href}
                       href={link.href}
+                      onClick={close}
                       aria-current={active ? "page" : undefined}
                       className={cn(
-                        "rounded-md px-3 py-2 text-sm transition-colors",
+                        "rounded-md px-3 py-2 text-sm transition-colors active:bg-emerald-400/25",
                         active
                           ? "bg-emerald-400/15 text-foreground"
                           : "text-muted-foreground hover:bg-emerald-400/10 hover:text-foreground",
@@ -244,11 +287,16 @@ export function SiteNav({
           <div
             className={cn("ml-auto flex items-center gap-0.5 py-0.5 pr-1 pl-2", AI_GROUP_FRAME)}
           >
-            <AiSparkIcon
-              className="size-3.5 shrink-0 text-emerald-500 dark:text-emerald-400"
-              aria-hidden="true"
-            />
-            <span className="sr-only">AI features:</span>
+            <span
+              className="flex shrink-0 items-center gap-0.5 pr-0.5 text-emerald-500 dark:text-emerald-400"
+              title="Model-backed · sign-in and approval required"
+            >
+              <AiSparkIcon className="size-3.5" />
+              <LockIcon className="size-3" />
+            </span>
+            <span className="sr-only">
+              AI features, sign-in and approval required:
+            </span>
             {AI_LINKS.map((link) => {
               const active = isActive(link.href, pathname);
               return (
