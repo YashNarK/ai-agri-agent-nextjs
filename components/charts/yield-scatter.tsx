@@ -120,6 +120,7 @@ export function YieldScatter({ data, cropName, height = 340 }: YieldScatterProps
     <ChartFrame
       dimensions={dimensions}
       containerRef={ref}
+      height={height}
       title={`Yield against harvested area for ${cropName}, by region`}
       legend={groups}
       overlay={

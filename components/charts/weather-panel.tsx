@@ -22,8 +22,11 @@ import { useMemo } from "react";
 
 import { formatDecimal, formatMonthYear, parseIsoDate } from "./format";
 import { AxisBottom, AxisLeft } from "./primitives/axis";
+import { ExpandButton } from "./primitives/chart-frame";
 import { useChartDimensions } from "./primitives/use-chart-dimensions";
+import { useFullscreen } from "./primitives/use-fullscreen";
 import { CHROME, MARKS, seriesColor } from "./theme";
+import { cn } from "@/lib/utils";
 
 export interface WeatherPoint {
   weather_date: string;
@@ -53,6 +56,11 @@ export function WeatherPanel({
 }: WeatherPanelProps) {
   const { ref, dimensions } = useChartDimensions<HTMLDivElement>(height);
   const { innerWidth, innerHeight, margin } = dimensions;
+  const {
+    ref: fullscreenRef,
+    isFullscreen,
+    toggle,
+  } = useFullscreen<HTMLDivElement>();
 
   const points = useMemo(
     () =>
@@ -141,14 +149,31 @@ export function WeatherPanel({
   }
 
   return (
-    <div className="w-full">
+    <div
+      ref={fullscreenRef}
+      className={cn(
+        "group/chart w-full",
+        isFullscreen && "flex h-screen flex-col bg-background p-6",
+      )}
+    >
       {/* Each panel is titled rather than legended: one measure per
           panel means the title alone identifies the series */}
-      <div ref={ref} className="relative w-full">
+      <div className="flex justify-end">
+        <ExpandButton
+          isFullscreen={isFullscreen}
+          onToggle={toggle}
+          title={`Weather for ${regionName}`}
+        />
+      </div>
+      <div
+        ref={ref}
+        className={cn("relative w-full", isFullscreen && "min-h-0 flex-1")}
+        style={isFullscreen ? undefined : { height }}
+      >
         {dimensions.width > 0 && (
           <svg
             width={dimensions.width}
-            height={height}
+            height={dimensions.height}
             role="img"
             aria-label={`Temperature, rainfall and drought index for ${regionName}`}
           >

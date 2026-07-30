@@ -1,7 +1,7 @@
-// ============================================================
+﻿// ============================================================
 // app/dashboard/admin/users/page.tsx
 //
-// The approval queue — the admin half of the two-gate design.
+// The approval queue â€” the admin half of the two-gate design.
 //
 // Pending requests come first because they are the only rows that need
 // a decision; everyone else is shown below for context and revocation.
@@ -115,7 +115,7 @@ function UserTable({
           <TableRow key={user.id}>
             <TableCell className="font-medium">{identify(user)}</TableCell>
             <TableCell className="text-muted-foreground">
-              {user.github_login ? `@${user.github_login}` : "—"}
+              {user.github_login ? `@${user.github_login}` : "â€”"}
             </TableCell>
             <TableCell>{user.role}</TableCell>
             <TableCell>
@@ -142,7 +142,7 @@ export default async function AdminUsersPage() {
   const decided = all.filter((user) => user.status !== "pending");
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-8 px-6 py-8">
+    <div className="mx-auto w-full max-w-[88rem] space-y-8 px-6 py-8">
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">
           Access requests

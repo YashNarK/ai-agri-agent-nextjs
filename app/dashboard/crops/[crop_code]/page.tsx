@@ -77,7 +77,7 @@ export default async function CropPage({
   const regionsWithPrices = pairs.filter((p) => p.crop_code === crop.code);
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-6 px-6 py-8">
+    <div className="mx-auto w-full max-w-[88rem] space-y-6 px-6 py-8">
       <header className="space-y-2">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-semibold tracking-tight">{crop.name}</h1>

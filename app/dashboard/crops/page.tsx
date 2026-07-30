@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // app/dashboard/crops/page.tsx
 // Crop catalog, grouped by category.
 //
@@ -33,7 +33,7 @@ export default async function CropsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-6 px-6 py-8">
+    <div className="mx-auto w-full max-w-[88rem] space-y-6 px-6 py-8">
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">Crops</h1>
         <p className="text-sm text-muted-foreground">

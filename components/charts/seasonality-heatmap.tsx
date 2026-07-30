@@ -17,8 +17,11 @@ import { scaleQuantize } from "d3-scale";
 import { useMemo, useState } from "react";
 
 import { formatUsdPrecise, parseIsoDate } from "./format";
+import { ExpandButton } from "./primitives/chart-frame";
 import { ChartTooltip } from "./primitives/tooltip";
 import { useChartDimensions } from "./primitives/use-chart-dimensions";
+import { useFullscreen } from "./primitives/use-fullscreen";
+import { cn } from "@/lib/utils";
 import { CHROME, MARKS, SEQUENTIAL } from "./theme";
 
 export interface SeasonalityPoint {
@@ -53,6 +56,11 @@ export function SeasonalityHeatmap({
   });
   const { innerWidth, innerHeight, margin } = dimensions;
   const [hover, setHover] = useState<Cell | null>(null);
+  const {
+    ref: fullscreenRef,
+    isFullscreen,
+    toggle,
+  } = useFullscreen<HTMLDivElement>();
 
   const { cells, years, colorScale } = useMemo(() => {
     const cells: Cell[] = data.map((d) => {
@@ -83,7 +91,13 @@ export function SeasonalityHeatmap({
   const cellHeight = years.length > 0 ? innerHeight / years.length : 0;
 
   return (
-    <div className="w-full">
+    <div
+      ref={fullscreenRef}
+      className={cn(
+        "group/chart w-full",
+        isFullscreen && "flex h-screen flex-col bg-background p-6",
+      )}
+    >
       {/* Continuous legend — a sequential scale is ordered by lightness,
           so it needs a low/high anchor rather than a keyed list */}
       <div className="mb-3 flex items-center gap-2">
@@ -94,13 +108,22 @@ export function SeasonalityHeatmap({
           ))}
         </div>
         <span className="text-xs text-muted-foreground">Higher</span>
+        <ExpandButton
+          isFullscreen={isFullscreen}
+          onToggle={toggle}
+          title="Seasonality heatmap"
+        />
       </div>
 
-      <div ref={ref} className="relative w-full">
+      <div
+        ref={ref}
+        className={cn("relative w-full", isFullscreen && "min-h-0 flex-1")}
+        style={isFullscreen ? undefined : { height }}
+      >
         {dimensions.width > 0 && (
           <svg
             width={dimensions.width}
-            height={height}
+            height={dimensions.height}
             role="img"
             aria-label="Price by month and year"
           >

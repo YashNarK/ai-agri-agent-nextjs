@@ -156,6 +156,7 @@ export function PriceHistoryChart({
       <ChartFrame
         dimensions={dimensions}
         containerRef={ref}
+        height={height}
         title={`Price and traded volume for ${cropName} in ${regionName}`}
         legend={[
           { label: "Price (USD/tonne)", color: PRICE_COLOR },

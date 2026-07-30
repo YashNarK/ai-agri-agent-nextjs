@@ -111,6 +111,7 @@ export function ForecastChart({
     <ChartFrame
       dimensions={dimensions}
       containerRef={ref}
+      height={height}
       title={`Price history and forecast for ${cropName} in ${regionName}`}
       legend={[
         { label: "Observed price", color: HISTORY_COLOR },

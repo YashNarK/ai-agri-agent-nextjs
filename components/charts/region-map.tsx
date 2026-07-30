@@ -29,9 +29,12 @@ import type { GeometryCollection, Topology } from "topojson-specification";
 
 import worldTopology from "world-atlas/countries-110m.json";
 
+import { ExpandButton } from "./primitives/chart-frame";
 import { useChartDimensions } from "./primitives/use-chart-dimensions";
+import { useFullscreen } from "./primitives/use-fullscreen";
 import { ChartTooltip } from "./primitives/tooltip";
 import { CHROME, MARKS, seriesColor } from "./theme";
+import { cn } from "@/lib/utils";
 
 export interface MappedRegion {
   code: string;
@@ -109,6 +112,11 @@ export function RegionMap({
   });
   const { innerWidth, innerHeight, margin } = dimensions;
   const [hover, setHover] = useState<MappedRegion | null>(null);
+  const {
+    ref: fullscreenRef,
+    isFullscreen,
+    toggle,
+  } = useFullscreen<HTMLDivElement>();
 
   const plotted = useMemo(
     () =>
@@ -192,12 +200,35 @@ export function RegionMap({
   ).length;
 
   return (
-    <div className="w-full">
-      <div ref={ref} className="relative w-full">
+    <div
+      ref={fullscreenRef}
+      className={cn(
+        "group/chart w-full",
+        // Fullscreen paints this element, not the page behind it, so the
+        // background must be set explicitly.
+        isFullscreen && "flex h-screen flex-col bg-background p-6",
+      )}
+    >
+      <div className="flex justify-end">
+        <ExpandButton
+          isFullscreen={isFullscreen}
+          onToggle={toggle}
+          title="Region globe"
+        />
+      </div>
+
+      <div
+        ref={ref}
+        className={cn("relative w-full", isFullscreen && "min-h-0 flex-1")}
+        // Explicit height so useChartDimensions has something real to
+        // measure — an auto height would let the SVG size the box that
+        // sizes the SVG.
+        style={isFullscreen ? undefined : { height }}
+      >
         {innerWidth > 0 && (
           <svg
             width={dimensions.width}
-            height={height}
+            height={dimensions.height}
             role="img"
             aria-label={`Globe showing ${plotted.length} growing regions; drag to rotate`}
             onPointerDown={onPointerDown}

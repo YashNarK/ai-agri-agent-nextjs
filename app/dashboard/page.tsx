@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // app/dashboard/page.tsx
 //
 // Overview: coverage stat tiles, then the macro indicators as small
@@ -6,7 +6,7 @@
 //
 // The tiles are deliberately NOT charts. Four single numbers have no
 // shape to compare, and plotting them would add ink without adding
-// information — a hero figure with a label is the right form for a lone
+// information â€” a hero figure with a label is the right form for a lone
 // magnitude.
 // ============================================================
 
@@ -27,7 +27,7 @@ import { getAvailablePairs, getCrops, getIndicators, getRegions } from "@/lib/ap
 export const metadata = { title: "Overview" };
 
 // Without this the page has no dynamic API, so Next prerenders it at
-// build time — baking a snapshot of the database into the bundle. These
+// build time â€” baking a snapshot of the database into the bundle. These
 // counts and indicator series must reflect the live database on every
 // request, so opt out of static generation explicitly.
 export const dynamic = "force-dynamic";
@@ -66,11 +66,11 @@ export default async function DashboardPage() {
 
   const totalMonths = pairs.reduce((sum, p) => sum + p.months, 0);
   const coverage = pairs.length
-    ? `${pairs[0].start_date.slice(0, 4)}–${pairs[0].end_date.slice(0, 4)}`
-    : "—";
+    ? `${pairs[0].start_date.slice(0, 4)}â€“${pairs[0].end_date.slice(0, 4)}`
+    : "â€”";
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-8 px-6 py-8">
+    <div className="mx-auto w-full max-w-[88rem] space-y-8 px-6 py-8">
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
         <p className="text-sm text-muted-foreground">
@@ -84,7 +84,7 @@ export default async function DashboardPage() {
         <StatTile
           value={String(pairs.length)}
           label="Price series"
-          hint={`Crop × region pairs, ${coverage}`}
+          hint={`Crop Ã— region pairs, ${coverage}`}
         />
         <StatTile
           value={formatCompact(totalMonths)}
@@ -100,7 +100,7 @@ export default async function DashboardPage() {
           </h2>
           <p className="text-sm text-muted-foreground">
             The four drivers the price model consumes as features. Each is its
-            own panel — they are different units and do not share a scale.
+            own panel â€” they are different units and do not share a scale.
           </p>
         </div>
 
@@ -120,13 +120,13 @@ export default async function DashboardPage() {
                   </CardTitle>
                   <CardDescription>
                     {series.points.length} observations
-                    {series.unit ? ` · ${series.unit}` : ""}
+                    {series.unit ? ` Â· ${series.unit}` : ""}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="flex items-end justify-between gap-4">
                   <div>
                     <p className="text-2xl font-semibold tabular-nums">
-                      {latest === undefined ? "—" : formatDecimal(latest)}
+                      {latest === undefined ? "â€”" : formatDecimal(latest)}
                     </p>
                     {change !== null && (
                       <p className="text-xs text-muted-foreground tabular-nums">

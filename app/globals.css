@@ -227,6 +227,16 @@
     font-family: var(--font-heading), var(--font-body), sans-serif;
     letter-spacing: -0.011em;
   }
+  /* Scrollable without the bar — for strips like the nav that must stay
+     reachable on narrow screens without a scrollbar cutting across the
+     chrome. Content is still keyboard- and touch-scrollable. */
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
   /* Plex's tabular figures are opt-in. Every number in this app sits in
      a chart axis, a stat tile or a table column, so aligning them by
      default is right and `tabular-nums` utilities keep working. */

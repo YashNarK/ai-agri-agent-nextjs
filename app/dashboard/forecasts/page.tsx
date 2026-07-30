@@ -1,9 +1,9 @@
-// ============================================================
+﻿// ============================================================
 // app/dashboard/forecasts/page.tsx
 //
 // Forecast audit trail. Every prediction the platform has served is
 // persisted with the feature row that produced it, so this browses that
-// history — it does NOT call the Azure ML endpoint. Reading is free;
+// history â€” it does NOT call the Azure ML endpoint. Reading is free;
 // only POST /api/predictions scores anything.
 //
 // Selecting a row shows the forecast against the observed history for
@@ -55,7 +55,7 @@ async function ForecastDetail({ forecast }: { forecast: LoggedPrediction }) {
       <Card>
         <CardHeader>
           <CardTitle>
-            {forecast.crop_name} — {forecast.region_name}
+            {forecast.crop_name} â€” {forecast.region_name}
           </CardTitle>
           <CardDescription>
             Forecast for {forecast.target_date}, scored{" "}
@@ -111,12 +111,12 @@ export default async function ForecastsPage({
     predictions.find((p) => String(p.id) === params.id) ?? predictions[0];
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-6 px-6 py-8">
+    <div className="mx-auto w-full max-w-[88rem] space-y-6 px-6 py-8">
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">Forecasts</h1>
         <p className="text-sm text-muted-foreground">
           Every forecast served, with the inputs that produced it. Browsing
-          this is read-only — no model is re-scored.
+          this is read-only â€” no model is re-scored.
         </p>
       </header>
 
@@ -176,7 +176,7 @@ export default async function ForecastsPage({
                         <TableCell className="text-right text-muted-foreground tabular-nums">
                           {p.confidence_low !== null &&
                           p.confidence_high !== null ? (
-                            `${formatUsdPrecise(p.confidence_low)} – ${formatUsdPrecise(p.confidence_high)}`
+                            `${formatUsdPrecise(p.confidence_low)} â€“ ${formatUsdPrecise(p.confidence_high)}`
                           ) : (
                             <Badge variant="outline">none</Badge>
                           )}

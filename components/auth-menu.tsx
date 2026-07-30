@@ -55,7 +55,9 @@ export async function AuthMenu() {
         </Badge>
       )}
 
-      <span className="hidden text-sm text-muted-foreground sm:inline">
+      {/* Truncated: a long display name is the one item here that can
+          grow without bound, and it was pushing the row into overflow. */}
+      <span className="hidden max-w-[16ch] truncate text-sm text-muted-foreground lg:inline">
         {viewer.name || viewer.email}
       </span>
 

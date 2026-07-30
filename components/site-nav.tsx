@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 // ============================================================
 // components/site-nav.tsx
@@ -35,12 +35,25 @@ export function SiteNav({ authMenu }: { authMenu?: React.ReactNode }) {
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur">
-      <div className="mx-auto flex h-14 w-full max-w-6xl items-center gap-6 px-6">
-        <Link href="/" className="text-sm font-semibold tracking-tight">
+      <div className="mx-auto flex h-14 w-full max-w-[88rem] items-center gap-4 px-6">
+        <Link
+          href="/"
+          className="shrink-0 text-sm font-semibold tracking-tight"
+        >
           Agricultural Intelligence
         </Link>
 
-        <nav className="flex flex-1 items-center gap-1 overflow-x-auto">
+        {/*
+          min-w-0 lets this shrink instead of forcing the row wider than
+          the container — without it a flex child refuses to go below its
+          content width, which is what pushed the row into overflow and
+          produced a scrollbar across the middle of the header.
+
+          The scroll itself is kept for narrow viewports, where the links
+          genuinely cannot fit, but the bar is hidden: a visible
+          scrollbar wedged between two rows of chrome reads as breakage.
+        */}
+        <nav className="no-scrollbar flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
           {LINKS.map((link) => {
             // exact match for the index, prefix match for sections, so
             // /dashboard doesn't stay lit on every child route
@@ -66,8 +79,10 @@ export function SiteNav({ authMenu }: { authMenu?: React.ReactNode }) {
           })}
         </nav>
 
-        {authMenu}
-        <ModeToggle />
+        <div className="flex shrink-0 items-center gap-2">
+          {authMenu}
+          <ModeToggle />
+        </div>
       </div>
     </header>
   );

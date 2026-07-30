@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // app/dashboard/prices/page.tsx
 //
 // Price explorer. A Server Component: crops, regions, available pairs
@@ -38,7 +38,7 @@ import {
 import { PairPicker } from "./pair-picker";
 
 export const metadata = {
-  title: "Prices — Agricultural Intelligence",
+  title: "Prices â€” Agricultural Intelligence",
 };
 
 /**
@@ -46,7 +46,7 @@ export const metadata = {
  *
  * Both are monthly, but they are not guaranteed to cover the same
  * months, so they are joined on the date key rather than zipped by
- * index — zipping two differently-covered series silently compares
+ * index â€” zipping two differently-covered series silently compares
  * unrelated months and produces a confident, meaningless number.
  */
 function correlateWithMacros(
@@ -99,7 +99,7 @@ async function PriceSection({
       <Card>
         <CardHeader>
           <CardTitle>
-            {history.crop} — {history.region}
+            {history.crop} â€” {history.region}
           </CardTitle>
           <CardDescription>
             {history.total} monthly observations, USD per tonne
@@ -167,7 +167,7 @@ export default async function PricesPage({
   const regionNames = Object.fromEntries(regions.map((r) => [r.code, r.name]));
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-6 px-6 py-8">
+    <div className="mx-auto w-full max-w-[88rem] space-y-6 px-6 py-8">
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">Price explorer</h1>
         <p className="text-sm text-muted-foreground">

@@ -34,12 +34,24 @@ export interface ChartDimensions {
   innerHeight: number;
 }
 
+/**
+ * `height` is the RESTING height only. The element is measured in both
+ * axes, so whatever renders it — ChartFrame, say, while expanded to
+ * fullscreen — can give the container a different height and the scales
+ * follow without the chart knowing anything about it.
+ *
+ * This depends on the container having an explicit CSS height. With an
+ * auto height the SVG would size the container and the container would
+ * size the SVG, which oscillates. ChartFrame sets it; a chart rendering
+ * its own SVG must do the same.
+ */
 export function useChartDimensions<T extends HTMLElement = HTMLDivElement>(
   height = 260,
   margin: Partial<ChartMargin> = {},
 ) {
   const ref = useRef<T>(null);
   const [width, setWidth] = useState(0);
+  const [measuredHeight, setMeasuredHeight] = useState(height);
 
   // margin is typically an inline literal, so memo on its values rather
   // than its identity — otherwise every render invalidates downstream
@@ -53,27 +65,36 @@ export function useChartDimensions<T extends HTMLElement = HTMLDivElement>(
     const element = ref.current;
     if (!element) return;
 
-    // set the initial width before the first observer callback, so the
+    // set the initial size before the first observer callback, so the
     // chart doesn't flash at zero width on mount
     setWidth(element.clientWidth);
+    setMeasuredHeight(element.clientHeight || height);
 
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
-      if (entry) setWidth(entry.contentRect.width);
+      if (!entry) return;
+      setWidth(entry.contentRect.width);
+      // Falls back to the resting height when the container reports
+      // zero — which happens for a moment while entering fullscreen,
+      // and would otherwise collapse every scale to a range of 0.
+      setMeasuredHeight(Math.round(entry.contentRect.height) || height);
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [height]);
 
   const dimensions = useMemo<ChartDimensions>(
     () => ({
       width,
-      height,
+      height: measuredHeight,
       margin: resolvedMargin,
       innerWidth: Math.max(0, width - resolvedMargin.left - resolvedMargin.right),
-      innerHeight: Math.max(0, height - resolvedMargin.top - resolvedMargin.bottom),
+      innerHeight: Math.max(
+        0,
+        measuredHeight - resolvedMargin.top - resolvedMargin.bottom,
+      ),
     }),
-    [width, height, resolvedMargin],
+    [width, measuredHeight, resolvedMargin],
   );
 
   return { ref, dimensions } as const;
