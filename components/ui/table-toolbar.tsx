@@ -16,7 +16,7 @@
 // ============================================================
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -58,6 +58,8 @@ export function TableSearch({
   const urlValue = searchParams.get(paramName) ?? "";
   const [value, setValue] = useState(urlValue);
   const [seenUrlValue, setSeenUrlValue] = useState(urlValue);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const wasFocused = useRef(false);
 
   // Adopt the URL when it changes from OUTSIDE this input — a back
   // navigation, or a link that clears the filter.
@@ -89,12 +91,42 @@ export function TableSearch({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, urlValue, paramName]);
 
+  /**
+   * Reclaims focus if the re-render this input triggered dropped it.
+   *
+   * Removing the Suspense boundary above is what actually fixes the
+   * jump; this is the guard against it coming back. Two conditions keep
+   * it from ever stealing focus: it only acts when the caret was in this
+   * box when the navigation started, and only when focus has fallen to
+   * <body> — never when the user has deliberately moved somewhere else.
+   *
+   * preventScroll matters as much as the focus() call: refocusing an
+   * off-screen element scrolls it into view by default, which is the
+   * exact jump being fixed.
+   */
+  useEffect(() => {
+    if (pending || !wasFocused.current) return;
+    const active = document.activeElement;
+    if (active === inputRef.current) return;
+    if (active && active !== document.body) return;
+    inputRef.current?.focus({ preventScroll: true });
+  }, [pending]);
+
   return (
     <div className="relative w-full max-w-xs">
       <input
+        ref={inputRef}
         type="search"
         value={value}
-        onChange={(event) => setValue(event.target.value)}
+        onChange={(event) => {
+          // Typing (or hitting the native ✕) means the caret is here, so
+          // remember it — the re-render this triggers must not lose it.
+          wasFocused.current = true;
+          setValue(event.target.value);
+        }}
+        onBlur={() => {
+          wasFocused.current = false;
+        }}
         placeholder={placeholder}
         aria-label={placeholder}
         className="h-8 w-full rounded-lg border border-border bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"

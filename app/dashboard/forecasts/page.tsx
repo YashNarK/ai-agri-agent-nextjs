@@ -125,19 +125,27 @@ export default async function ForecastsPage({
   const query = params.q?.trim() || null;
   const page = Math.max(1, Number(params.page) || 1);
 
-  const [{ predictions, total }, cropList, regions] = await Promise.all([
+  const [{ predictions, total }, newest, cropList, regions] = await Promise.all([
     getLoggedPredictions(PAGE_SIZE, page, query),
+    // Unfiltered, so the default selection does not move with the search.
+    getLoggedPredictions(1, 1, null),
     getCrops(),
     getRegions(),
   ]);
 
-  // Fetched by id, not looked up in the rows above: the selected
+  // Fetched by id rather than looked up in the rows above: the selected
   // forecast need not be on the page being shown — a search filter or
   // any page past the first hides it, and a fresh run redirects here
   // with an id before the table has been paged at all.
+  //
+  // The fallback is the newest forecast OVERALL, deliberately not the
+  // first row of the current page. The detail panel sits above the
+  // table, so making it follow the filter meant it swapped content — and
+  // height — on every keystroke, shifting the search box out from under
+  // the cursor. Selection now changes only when you pick a row.
   const selected =
     (params.id ? await getPrediction(Number(params.id)) : null) ??
-    predictions[0];
+    newest.predictions[0];
 
   // Bounds computed on the server so the earliest selectable date does
   // not depend on the viewer's clock or timezone, and matches what the
@@ -198,11 +206,15 @@ export default async function ForecastsPage({
                   Every run, newest first. Select one to inspect it.
                 </CardDescription>
               </div>
-              {/* Suspense because TableSearch reads useSearchParams, which
-                  would otherwise opt this whole route out of prerendering. */}
-              <Suspense fallback={null}>
-                <TableSearch placeholder="Search crop or region…" />
-              </Suspense>
+              {/*
+                NOT wrapped in Suspense. useSearchParams only needs a
+                boundary on a PRERENDERED route, and this one is
+                force-dynamic. With a boundary here, every search-param
+                change could swap in the fallback — unmounting the input
+                mid-type, throwing focus to <body> and collapsing the
+                header, which reads as the page jumping to the top.
+              */}
+              <TableSearch placeholder="Search crop or region…" />
             </CardHeader>
             <CardContent className="px-0">
               <div className="overflow-x-auto">
@@ -255,13 +267,7 @@ export default async function ForecastsPage({
                 )}
               </div>
 
-              <Suspense fallback={null}>
-                <TablePagination
-                  page={page}
-                  pageSize={PAGE_SIZE}
-                  total={total}
-                />
-              </Suspense>
+              <TablePagination page={page} pageSize={PAGE_SIZE} total={total} />
             </CardContent>
           </Card>
         </>
