@@ -20,7 +20,7 @@ import { formatUsdPrecise, parseIsoDate } from "./format";
 import { ChartTypeLabel, ExpandButton } from "./primitives/chart-frame";
 import { ChartTooltip } from "./primitives/tooltip";
 import { useChartDimensions } from "./primitives/use-chart-dimensions";
-import { useFullscreen } from "./primitives/use-fullscreen";
+import { expandedClasses, useFullscreen } from "./primitives/use-fullscreen";
 import { cn } from "@/lib/utils";
 import { CHROME, MARKS, SEQUENTIAL } from "./theme";
 
@@ -59,6 +59,7 @@ export function SeasonalityHeatmap({
   const {
     ref: fullscreenRef,
     isFullscreen,
+    isOverlay,
     toggle,
   } = useFullscreen<HTMLDivElement>();
 
@@ -93,10 +94,7 @@ export function SeasonalityHeatmap({
   return (
     <div
       ref={fullscreenRef}
-      className={cn(
-        "group/chart w-full",
-        isFullscreen && "flex h-screen flex-col bg-background p-6",
-      )}
+      className={cn("group/chart w-full", expandedClasses(isFullscreen, isOverlay))}
     >
       {/* A dense month × year matrix where colour, not position, carries
           the measure — and the cyclical month axis is what makes it a

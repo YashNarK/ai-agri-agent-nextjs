@@ -19,6 +19,32 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { cn } from "@/lib/utils";
+
+/**
+ * Classes for the expanded container.
+ *
+ * The two modes need different geometry, which is the bug this replaced:
+ * the overlay path used to get `h-screen` and nothing else, so it grew
+ * inside the normal document flow instead of covering it — the chart
+ * simply became tall and clipped.
+ *
+ * Native fullscreen needs no positioning at all: the element IS the
+ * viewport, so it only needs a background, since fullscreen paints the
+ * element rather than the page behind it. The fallback needs to be a
+ * real overlay.
+ */
+export function expandedClasses(
+  isFullscreen: boolean,
+  isOverlay: boolean,
+): string {
+  if (!isFullscreen) return "";
+  return cn(
+    "flex flex-col bg-background p-6",
+    isOverlay ? "fixed inset-0 z-50 h-dvh w-screen" : "h-screen",
+  );
+}
+
 export interface FullscreenState<T extends HTMLElement> {
   ref: React.RefObject<T | null>;
   isFullscreen: boolean;

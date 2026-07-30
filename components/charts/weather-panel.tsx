@@ -24,7 +24,7 @@ import { formatDecimal, formatMonthYear, parseIsoDate } from "./format";
 import { AxisBottom, AxisLeft } from "./primitives/axis";
 import { ChartTypeLabel, ExpandButton } from "./primitives/chart-frame";
 import { useChartDimensions } from "./primitives/use-chart-dimensions";
-import { useFullscreen } from "./primitives/use-fullscreen";
+import { expandedClasses, useFullscreen } from "./primitives/use-fullscreen";
 import { CHROME, MARKS, seriesColor } from "./theme";
 import { cn } from "@/lib/utils";
 
@@ -59,6 +59,7 @@ export function WeatherPanel({
   const {
     ref: fullscreenRef,
     isFullscreen,
+    isOverlay,
     toggle,
   } = useFullscreen<HTMLDivElement>();
 
@@ -151,10 +152,7 @@ export function WeatherPanel({
   return (
     <div
       ref={fullscreenRef}
-      className={cn(
-        "group/chart w-full",
-        isFullscreen && "flex h-screen flex-col bg-background p-6",
-      )}
+      className={cn("group/chart w-full", expandedClasses(isFullscreen, isOverlay))}
     >
       {/* Each panel is titled rather than legended: one measure per
           panel means the title alone identifies the series */}

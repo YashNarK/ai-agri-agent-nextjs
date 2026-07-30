@@ -31,7 +31,7 @@ import worldTopology from "world-atlas/countries-110m.json";
 
 import { ChartTypeLabel, ExpandButton } from "./primitives/chart-frame";
 import { useChartDimensions } from "./primitives/use-chart-dimensions";
-import { useFullscreen } from "./primitives/use-fullscreen";
+import { expandedClasses, useFullscreen } from "./primitives/use-fullscreen";
 import { ChartTooltip } from "./primitives/tooltip";
 import { CHROME, MARKS, seriesColor } from "./theme";
 import { cn } from "@/lib/utils";
@@ -115,6 +115,7 @@ export function RegionMap({
   const {
     ref: fullscreenRef,
     isFullscreen,
+    isOverlay,
     toggle,
   } = useFullscreen<HTMLDivElement>();
 
@@ -202,12 +203,7 @@ export function RegionMap({
   return (
     <div
       ref={fullscreenRef}
-      className={cn(
-        "group/chart w-full",
-        // Fullscreen paints this element, not the page behind it, so the
-        // background must be set explicitly.
-        isFullscreen && "flex h-screen flex-col bg-background p-6",
-      )}
+      className={cn("group/chart w-full", expandedClasses(isFullscreen, isOverlay))}
     >
       <div className="flex items-start justify-between gap-4">
         {/* A point (dot) map, NOT a choropleth — regions are plotted as
@@ -248,7 +244,7 @@ export function RegionMap({
           >
             <g transform={`translate(${margin.left}, ${margin.top})`}>
               {/* ocean */}
-              <path d={sphere} fill="var(--muted)" fillOpacity={0.45} />
+              <path d={sphere} fill="var(--muted)" fillOpacity={0.35} />
 
               {/* graticule under the land, so it reads as a wireframe
                   the continents sit on rather than a grid drawn over them */}
@@ -260,15 +256,24 @@ export function RegionMap({
                 strokeOpacity={0.7}
               />
 
+              {/*
+                Land is tinted with the FOREGROUND ink, not a surface
+                token. --card and --muted sit within a few points of each
+                other on the dark theme, so land drawn in --card was
+                nearly invisible against the ocean. Foreground inverts
+                with the theme by definition — light ink on a dark map,
+                dark ink on a light one — so a low-opacity fill separates
+                land from sea in both without a per-theme override.
+              */}
               {countries.map((d, index) => (
                 <path
                   key={index}
                   d={d}
-                  fill="var(--card)"
-                  fillOpacity={0.92}
+                  fill="var(--foreground)"
+                  fillOpacity={0.14}
                   stroke={CHROME.axis}
-                  strokeWidth={0.4}
-                  strokeOpacity={0.55}
+                  strokeWidth={0.5}
+                  strokeOpacity={0.75}
                 />
               ))}
 

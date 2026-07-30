@@ -26,7 +26,7 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 import type { ChartDimensions } from "./use-chart-dimensions";
-import { useFullscreen } from "./use-fullscreen";
+import { expandedClasses, useFullscreen } from "./use-fullscreen";
 
 export interface LegendItem {
   label: string;
@@ -145,7 +145,7 @@ export function ChartFrame({
   chartType,
 }: ChartFrameProps) {
   const { width, height: measuredHeight, margin } = dimensions;
-  const { ref, isFullscreen, toggle } = useFullscreen<HTMLDivElement>();
+  const { ref, isFullscreen, isOverlay, toggle } = useFullscreen<HTMLDivElement>();
 
   const restingHeight = height ?? measuredHeight;
 
@@ -154,10 +154,7 @@ export function ChartFrame({
       ref={ref}
       className={cn(
         "group/chart relative w-full",
-        // Fullscreen paints the element itself, not the page behind it,
-        // so the background has to be set explicitly or the chart sits
-        // on the browser's default black.
-        isFullscreen && "flex h-screen flex-col bg-background p-6",
+        expandedClasses(isFullscreen, isOverlay),
       )}
     >
       <div className="flex items-start justify-between gap-4">
