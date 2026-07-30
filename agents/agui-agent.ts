@@ -181,7 +181,8 @@ export interface AgriculturalAgentOptions {
 }
 
 export class AgriculturalAgent extends AbstractAgent {
-  private readonly userId: string | null;
+  // Not `readonly`: clone() below has to write it on a fresh instance.
+  private userId: string | null;
 
   constructor(options: AgriculturalAgentOptions = {}) {
     super({
@@ -190,6 +191,29 @@ export class AgriculturalAgent extends AbstractAgent {
         "Agricultural intelligence agent — prices, forecasts, weather and agronomy.",
     });
     this.userId = options.userId ?? null;
+  }
+
+  /**
+   * Carries `userId` onto the clone.
+   *
+   * THIS OVERRIDE IS LOAD-BEARING. AbstractAgent.clone() builds the copy
+   * with `Object.create(getPrototypeOf(this))` and then copies an
+   * explicit allowlist of ITS OWN fields — agentId, description,
+   * threadId, messages, state, subscribers. Two consequences: our
+   * constructor never runs on the clone, and any field a subclass adds
+   * is silently dropped.
+   *
+   * The runtime clones the agent per run, so without this the instance
+   * that actually executes has `userId === undefined`. It still worked —
+   * every conversation was simply written with `user_id = NULL`, which
+   * meant the switcher (which filters by owner) never listed it and the
+   * transcript endpoint treated it as somebody else's and returned
+   * nothing. A silent data bug, not a crash.
+   */
+  clone(): this {
+    const next = super.clone() as this;
+    next.userId = this.userId;
+    return next;
   }
 
   run(input: RunAgentInput): Observable<BaseEvent> {
@@ -238,6 +262,16 @@ export class AgriculturalAgent extends AbstractAgent {
     if (this.userId) {
       await chatService.ensureOwnedSession(threadId, this.userId);
     } else {
+      // The only caller is /api/copilotkit, which always supplies the
+      // signed-in user — so reaching this branch means the id was lost
+      // in transit (see clone() above) and the conversation is about to
+      // be written with no owner. That is invisible in the UI: it saves
+      // fine and simply never appears again. Log loudly rather than
+      // repeat that.
+      console.error(
+        "[agui] running without a userId — this conversation will be " +
+          "written unowned and will not appear in the switcher.",
+      );
       await chatService.ensureSession(threadId, this.userId);
     }
 
