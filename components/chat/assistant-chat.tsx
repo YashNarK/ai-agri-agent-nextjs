@@ -20,6 +20,7 @@ import {
   useAgent,
   UseAgentUpdate,
 } from "@copilotkit/react-core/v2";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 
 import type { AgentUiState } from "@/agents/agui-agent";
@@ -126,8 +127,37 @@ function useRestoredTranscript(threadId: string) {
   }, [agent, threadId]);
 }
 
+/**
+ * Refreshes the server-rendered conversation list when a run finishes.
+ *
+ * A brand-new conversation only becomes a row in the switcher once its
+ * first turn is persisted, which happens server-side at the end of the
+ * run. Without this the sidebar stays empty until the next navigation,
+ * so the conversation you are actively having appears to be missing
+ * from the list of your conversations.
+ *
+ * Watches isRunning for a true→false edge rather than refreshing on
+ * every status change, so an idle page does not re-fetch.
+ */
+function useRefreshOnRunEnd() {
+  const router = useRouter();
+  const { agent } = useAgent({
+    agentId: AGENT_ID,
+    updates: [UseAgentUpdate.OnRunStatusChanged],
+  });
+  const wasRunning = useRef(false);
+
+  useEffect(() => {
+    if (wasRunning.current && !agent.isRunning) {
+      router.refresh();
+    }
+    wasRunning.current = agent.isRunning;
+  }, [agent.isRunning, router]);
+}
+
 export function AssistantChat({ threadId }: { threadId: string }) {
   useRestoredTranscript(threadId);
+  useRefreshOnRunEnd();
 
   return (
     <div className="flex h-full flex-col">

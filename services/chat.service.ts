@@ -17,8 +17,9 @@ import { randomUUID } from "node:crypto";
 
 import { getAgentGraph } from "@/agents/graph";
 import { isAiMessage, RECURSION_LIMIT } from "@/agents/nodes";
-import { notFound } from "@/lib/errors";
+import { ApiError, notFound } from "@/lib/errors";
 import type {
+  ConversationSummary,
   ChatResponse,
   MessageResponse,
   SessionSchema,
@@ -102,6 +103,37 @@ export function collectAllToolCalls(
   return all.length > 0 ? all : null;
 }
 
+/**
+ * A conversation's title, taken from the message that opened it.
+ *
+ * Not an LLM-generated summary: titling a conversation should not cost
+ * a model call, and the opening question is what a user actually
+ * remembers a thread by. Newlines collapse so a pasted block does not
+ * turn into a multi-line entry in the switcher.
+ */
+export function titleFrom(firstMessage: string): string {
+  const flat = firstMessage.replace(/\s+/g, " ").trim();
+  if (flat === "") return "Untitled conversation";
+  // 80 fits the sidebar at its widest without truncating mid-word for
+  // most questions; longer ones get an ellipsis rather than a hard cut.
+  if (flat.length <= 80) return flat;
+  const cut = flat.slice(0, 80);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${lastSpace > 40 ? cut.slice(0, lastSpace) : cut}…`;
+}
+
+/** "3m", "2h", "5d" — enough to order by, short enough for a sidebar. */
+export function relativeAge(at: Date, now: number): string {
+  const minutes = Math.max(0, Math.round((now - at.getTime()) / 60_000));
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.round(hours / 24);
+  if (days < 30) return `${days}d`;
+  return `${Math.round(days / 30)}mo`;
+}
+
 export interface ChatTurnInput {
   message: string;
   sessionId?: string | null;
@@ -117,8 +149,67 @@ export class ChatService {
     userId: string | null | undefined,
   ): Promise<string> {
     const id = sessionId || randomUUID();
+
+    // With a known user, go through the ownership check rather than the
+    // blind upsert — see ensureOwnedSession.
+    if (userId) return this.ensureOwnedSession(id, userId);
+
     await this.chatRepo.ensureSession(id, userId);
     return id;
+  }
+
+  /**
+   * Resolves a session id for a known user, refusing one that belongs to
+   * somebody else.
+   *
+   * The thread id is chosen by the client (it lives in the URL), so this
+   * is the only thing standing between a user and another user's
+   * conversation: the LangGraph checkpointer is keyed by thread id alone
+   * and will happily resume any thread it is handed.
+   */
+  async ensureOwnedSession(sessionId: string, userId: string): Promise<string> {
+    const outcome = await this.chatRepo.claimSession(sessionId, userId);
+    if (outcome === "foreign") {
+      throw new ApiError(403, "That conversation belongs to another account.");
+    }
+    return sessionId;
+  }
+
+  /**
+   * Whether a thread id is usable by this viewer — theirs, or not yet
+   * anybody's.
+   *
+   * Read-only, unlike ensureOwnedSession: the assistant page calls this
+   * on every render to decide whether to show the thread at all, and
+   * merely looking at a conversation should not create a row for it.
+   * Brand-new ids are fine, since visiting the page mints one before a
+   * word has been said.
+   */
+  async canUseThread(sessionId: string, viewerId: string): Promise<boolean> {
+    const session = await this.chatRepo.findSession(sessionId);
+    if (!session) return true;
+    return session.user_id === null || session.user_id === viewerId;
+  }
+
+  /**
+   * The signed-in user's conversations, for the switcher.
+   *
+   * Falls back to the session id when a conversation has no title —
+   * which only happens for turns persisted before auto-titling, since
+   * every new conversation is named from its opening message.
+   */
+  async listConversations(userId: string): Promise<ConversationSummary[]> {
+    const rows = await this.chatRepo.listSessionsForUser(userId);
+    const now = Date.now();
+
+    return rows.map((row) => ({
+      id: row.id,
+      title: row.session_name ?? "Untitled conversation",
+      message_count: row._count.chat_messages,
+      created_at: row.created_at.toISOString(),
+      updated_at: row.updated_at.toISOString(),
+      relative_age: relativeAge(row.updated_at, now),
+    }));
   }
 
   /**
@@ -167,6 +258,7 @@ export class ChatService {
       toolCalls,
       langgraphState: { message_count: allMessages.length },
     });
+    await this.chatRepo.setSessionNameIfEmpty(id, titleFrom(message));
 
     return { session_id: id, message: responseText, tool_calls: toolCalls };
   }
@@ -184,6 +276,7 @@ export class ChatService {
       aiMessage: finalText,
       toolCalls: toolNames.length > 0 ? toolNames.map((name) => ({ name })) : null,
     });
+    await this.chatRepo.setSessionNameIfEmpty(sessionId, titleFrom(userMessage));
   }
 
   /**
@@ -244,6 +337,13 @@ export class ChatService {
   /**
    * Idempotent delete: a missing session returns 200 with a graceful
    * message rather than 404, so cleanup jobs can call it blindly.
+   *
+   * The FK cascade removes the messages. It does NOT remove the
+   * LangGraph checkpoint for the same thread id, which lives in the
+   * checkpointer's own tables and has no foreign key to here. Those rows
+   * are unreachable afterwards — resuming a thread requires owning a
+   * chat_sessions row, and this just deleted it — but they are not
+   * reclaimed, so a periodic sweep is worth adding if churn grows.
    */
   async deleteSession(sessionId: string): Promise<MessageResponse> {
     const session = await this.chatRepo.findSession(sessionId);

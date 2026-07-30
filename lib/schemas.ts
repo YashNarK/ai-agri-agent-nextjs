@@ -331,6 +331,24 @@ export interface TranscriptResponse {
   messages: TranscriptMessage[];
 }
 
+/** One row in the assistant's conversation switcher. */
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  message_count: number;
+  created_at: string;
+  updated_at: string;
+  /**
+   * Pre-formatted age ("3m", "2h", "5d").
+   *
+   * Computed server-side rather than in the component because reading
+   * the clock during render is impure — and because stamping every row
+   * against one instant keeps two rows either side of a minute boundary
+   * from disagreeing about "now".
+   */
+  relative_age: string;
+}
+
 export interface SessionSchema {
   id: string;
   user_id: string | null;

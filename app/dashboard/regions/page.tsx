@@ -39,9 +39,11 @@ export default async function RegionsPage() {
         <CardHeader>
           <CardTitle className="text-base">Where they are</CardTitle>
           <CardDescription>
-            Plotted from stored coordinates. There is no country geometry in
-            the database, so this is a point map with a graticule for
-            orientation — nothing is shaded by value.
+            Plotted from stored coordinates on an orthographic globe, so
+            shapes and areas are undistorted. Drag to rotate. Country
+            outlines are there for orientation only — the database holds
+            points, not country-level measures, so nothing is shaded by
+            value.
           </CardDescription>
         </CardHeader>
         <CardContent>

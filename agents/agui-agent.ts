@@ -230,7 +230,16 @@ export class AgriculturalAgent extends AbstractAgent {
 
     // the AG-UI thread IS the chat session, so the existing session and
     // message tables stay the source of truth for both entry points
-    await chatService.ensureSession(threadId, this.userId);
+    //
+    // This also has to be an ownership check, not just a bootstrap. The
+    // thread id arrives from the client and the checkpointer below is
+    // keyed by it alone, so without this a user could name somebody
+    // else's thread and have the graph resume their conversation.
+    if (this.userId) {
+      await chatService.ensureOwnedSession(threadId, this.userId);
+    } else {
+      await chatService.ensureSession(threadId, this.userId);
+    }
 
     const graph = await getAgentGraph();
     const config = {

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { IBM_Plex_Sans, JetBrains_Mono, Space_Grotesk } from "next/font/google";
 import { Suspense } from "react";
 
 import { AuthMenu } from "@/components/auth-menu";
@@ -10,14 +10,43 @@ import { settings } from "@/lib/config/settings";
 
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// ============================================================
+// Type system
+//
+// Three faces, each doing one job:
+//
+//   Space Grotesk  — headings. Geometric with cut terminals; it reads
+//                    as engineered rather than editorial, which is the
+//                    character this app wants.
+//   IBM Plex Sans  — body and UI. Chosen over a neo-grotesk because the
+//                    dashboard is full of tabular figures, and Plex has
+//                    genuinely distinct numerals that stay legible in a
+//                    dense table.
+//   JetBrains Mono — code, ids and anything monospaced.
+//
+// The variable names are generic (--font-body, not --font-plex) so
+// swapping a face is a change in this file alone; globals.css maps them
+// onto Tailwind's font-sans / font-heading / font-mono.
+// ============================================================
+
+const fontBody = IBM_Plex_Sans({
+  variable: "--font-body",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const fontDisplay = Space_Grotesk({
+  variable: "--font-display",
   subsets: ["latin"],
+  weight: ["500", "600", "700"],
+  display: "swap",
+});
+
+const fontMono = JetBrains_Mono({
+  variable: "--font-mono-code",
+  subsets: ["latin"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -41,7 +70,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${fontBody.variable} ${fontDisplay.variable} ${fontMono.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col bg-background text-foreground">
         <ThemeProvider

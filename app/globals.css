@@ -7,9 +7,35 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  /* Faces come from app/layout.tsx. `--font-sans: var(--font-sans)` used
+     to sit here, which is circular — it resolves to nothing, so every
+     `font-sans` fell through to the browser default and the configured
+     face was never actually applied. */
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-mono-code);
+  --font-heading: var(--font-display);
+
+  /* Type scale.
+     The default scale was built around a 16px root and leaned on
+     `text-sm` for most body copy, which landed real reading text at
+     14px. The root moves to 17px below and the small end of the scale
+     is opened up, so the sizes this app actually uses — xs, sm, base —
+     gain the most, while the display sizes stay where they were rather
+     than ballooning the headings. */
+  --text-xs: 0.8125rem;   /* ~13.8px */
+  --text-xs--line-height: 1.45;
+  --text-sm: 0.9375rem;   /* ~15.9px */
+  --text-sm--line-height: 1.55;
+  --text-base: 1rem;      /* 17px */
+  --text-base--line-height: 1.6;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.55;
+  --text-xl: 1.3rem;
+  --text-xl--line-height: 1.45;
+  --text-2xl: 1.6rem;
+  --text-2xl--line-height: 1.3;
+  --text-3xl: 1.95rem;
+  --text-3xl--line-height: 1.2;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -183,5 +209,29 @@
   }
   html {
     @apply font-sans;
+    /* 17px, not the browser's 16. Tailwind's spacing is rem-based, so
+       this lifts the whole layout ~6% along with the text rather than
+       leaving enlarged type crammed into unchanged boxes. Deliberately
+       a modest step: a dense dashboard with wide tables starts
+       overflowing well before the text gets genuinely large, so the
+       reading gain comes mostly from the type scale above. */
+    font-size: 106.25%;
+  }
+  /* Headings carry the display face; everything else inherits body. */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-heading), var(--font-body), sans-serif;
+    letter-spacing: -0.011em;
+  }
+  /* Plex's tabular figures are opt-in. Every number in this app sits in
+     a chart axis, a stat tile or a table column, so aligning them by
+     default is right and `tabular-nums` utilities keep working. */
+  table,
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
   }
 }
