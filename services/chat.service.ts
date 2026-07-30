@@ -23,6 +23,8 @@ import type {
   MessageResponse,
   SessionSchema,
   ToolCallRecord,
+  TranscriptMessage,
+  TranscriptResponse,
 } from "@/lib/schemas";
 import type { ChatRepository } from "@/repositories/chat.repository";
 
@@ -182,6 +184,32 @@ export class ChatService {
       aiMessage: finalText,
       toolCalls: toolNames.length > 0 ? toolNames.map((name) => ({ name })) : null,
     });
+  }
+
+  /**
+   * The persisted transcript for a session, for rehydrating the chat UI
+   * after a reload.
+   *
+   * Deliberately tolerant of an unknown session: a thread id in the URL
+   * that has never been used is the normal first-visit case, not an error,
+   * and returning an empty transcript lets the client treat both the same.
+   *
+   * Only human and AI turns are replayed. Tool calls are persisted too,
+   * but their inline renderings belong to a live run — replaying them from
+   * a transcript would show chart cards with no run behind them.
+   */
+  async getTranscript(sessionId: string): Promise<TranscriptResponse> {
+    const rows = await this.chatRepo.listMessages(sessionId);
+
+    const messages: TranscriptMessage[] = rows
+      .filter((row) => row.role === "human" || row.role === "ai")
+      .map((row) => ({
+        id: String(row.id),
+        role: row.role === "human" ? ("user" as const) : ("assistant" as const),
+        content: row.content,
+      }));
+
+    return { session_id: sessionId, messages };
   }
 
   async getSession(sessionId: string): Promise<SessionSchema> {

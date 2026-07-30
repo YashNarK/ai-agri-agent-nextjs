@@ -5,9 +5,14 @@ const nextConfig: NextConfig = {
   // (WebSocket transport, native engine resolution) that misbehave once
   // bundled into the server build. Opting them out makes Next require
   // them natively instead.
+  // `pg` and the checkpointer that depends on it join the list for the
+  // same reason: node-postgres resolves its native/JS bindings at
+  // require time, which the bundler cannot follow.
   serverExternalPackages: [
     "@prisma/adapter-neon",
     "@neondatabase/serverless",
+    "@langchain/langgraph-checkpoint-postgres",
+    "pg",
     "ws",
   ],
 

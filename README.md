@@ -128,7 +128,7 @@ Errors use the Python service's shape: `{"detail": "..."}`.
 
 ## The agent
 
-`llm → (tools → llm)* → END`, compiled with a `MemorySaver` checkpointer keyed by
+`llm → (tools → llm)* → END`, compiled with a `PostgresSaver` checkpointer keyed by
 `thread_id` = session id. Two guardrails carried over verbatim:
 
 - **Tool-call budget** (`MAX_AGENT_TOOL_CALLS = 8`) — on exhaustion the final LLM
@@ -138,9 +138,23 @@ Errors use the Python service's shape: `{"detail": "..."}`.
   files it under `invalid_tool_calls`, and the ReAct loop stalls. We scan for the
   first balanced JSON object and promote the call back to a real one.
 
-`MemorySaver` is in-process: conversation memory resets on restart and is not
-shared across instances, matching the Python app. Swap in a Postgres
-checkpointer if you need durability across deploys.
+Conversation memory lives in Postgres, in LangGraph's own `checkpoints*` tables
+(default schema, not `agricultural` — they are the library's infrastructure, not
+domain data). `.setup()` creates them on first use, once per process. This
+replaced the Python app's in-process `MemorySaver`, which on Vercel meant every
+Lambda instance held its own memory and a conversation resumed on a different
+instance found none.
+
+The assistant's thread id lives in the URL (`/dashboard/assistant?thread=<uuid>`)
+and is simultaneously the LangGraph `thread_id` and the `chat_sessions` row id.
+Because it is in the URL rather than component state, a conversation survives
+navigation, reload and back/forward; `GET /api/chat/sessions/:id/messages`
+restores the visible transcript after a reload, while the checkpointer restores
+what the agent actually remembers.
+
+One thing that is deliberately NOT preserved: an answer still streaming when you
+navigate away. `AgriculturalAgent.run` aborts the graph on unsubscribe so
+abandoned runs stop costing Azure calls — the turn is cancelled, not resumed.
 
 ## Not ported
 

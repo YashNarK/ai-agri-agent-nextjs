@@ -3,29 +3,28 @@
 // ============================================================
 // components/chat/assistant-chat.tsx
 //
-// The chat surface: CopilotKit provider + chat view, wired to the
-// AG-UI agent at /api/copilotkit.
+// The chat surface: the chat view plus the work-budget readout, wired to
+// the AG-UI agent at /api/copilotkit. The provider itself is mounted by
+// the dashboard layout, not here.
 //
-// The thread id is generated once per mount and passed explicitly. It
-// becomes the LangGraph `thread_id` AND the chat_sessions row id, so
-// one identifier ties the checkpointed conversation to the persisted
+// The thread id arrives as a prop, resolved from the URL by the page. It
+// becomes the LangGraph `thread_id` AND the chat_sessions row id, so one
+// identifier ties the checkpointed conversation to the persisted
 // transcript — the same thing the REST /api/chat route does with its
-// session_id.
+// session_id. It used to be minted per mount, which meant leaving the
+// page and coming back silently started a different conversation.
 // ============================================================
 
 import {
   CopilotChat,
-  CopilotKitProvider,
   useAgent,
   UseAgentUpdate,
 } from "@copilotkit/react-core/v2";
-import { useState } from "react";
+import { useEffect, useRef } from "react";
 
 import type { AgentUiState } from "@/agents/agui-agent";
-import { toolRenderers } from "@/components/chat/tool-renderers";
 import { seriesColor } from "@/components/charts/theme";
-
-import "@copilotkit/react-core/v2/styles.css";
+import type { TranscriptResponse } from "@/lib/schemas";
 
 const AGENT_ID = "agricultural";
 
@@ -71,33 +70,81 @@ function WorkBudget() {
   );
 }
 
-export function AssistantChat() {
-  // one thread per mount; crypto.randomUUID in a lazy initialiser so it
-  // is generated on the client exactly once and never during SSR, where
-  // it would differ from the client value and trip hydration
-  const [threadId] = useState(() => crypto.randomUUID());
+/**
+ * Restores the persisted transcript into the agent after a full reload.
+ *
+ * Only runs when the agent has no messages of its own. Within a session
+ * the layout-level provider keeps the agent alive across navigation, so
+ * the in-memory transcript is already the fresher of the two — and it
+ * includes the turn currently streaming, which the database does not
+ * have until the run finishes. Overwriting that with the persisted copy
+ * would delete an answer as it was being written.
+ *
+ * A run in flight is also a reason to stay out of the way: setMessages
+ * mid-stream would drop the partial answer the run is appending to.
+ */
+function useRestoredTranscript(threadId: string) {
+  // `useAgent` in this version keys agents by agentId alone — there is no
+  // threadId parameter, so this is the same agent instance `<CopilotChat
+  // threadId={…}>` runs against, and the thread only matters for which
+  // transcript we fetch.
+  const { agent } = useAgent({ agentId: AGENT_ID });
+  // one restore attempt per thread, even under StrictMode's double effect
+  const restoredFor = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (restoredFor.current === threadId) return;
+    restoredFor.current = threadId;
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/chat/sessions/${encodeURIComponent(threadId)}/messages`,
+        );
+        if (!response.ok) return;
+
+        const transcript = (await response.json()) as TranscriptResponse;
+        if (cancelled) return;
+        if (transcript.messages.length === 0) return;
+        // re-checked here, not just above: the fetch is async, and a run
+        // may have started while it was in flight
+        if (agent.messages.length > 0 || agent.isRunning) return;
+
+        agent.setMessages(transcript.messages);
+      } catch {
+        // a failed restore is a cosmetic loss — the conversation itself
+        // is intact in the checkpointer, so the agent still has context
+        // for the next turn even with an empty-looking pane
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [agent, threadId]);
+}
+
+export function AssistantChat({ threadId }: { threadId: string }) {
+  useRestoredTranscript(threadId);
 
   return (
-    <CopilotKitProvider
-      runtimeUrl="/api/copilotkit"
-      renderToolCalls={toolRenderers}
-    >
-      <div className="flex h-full flex-col">
-        <div className="flex items-center justify-between border-b px-4 py-2">
-          <span className="text-sm font-medium">Agricultural assistant</span>
-          <WorkBudget />
-        </div>
-        <div className="min-h-0 flex-1">
-          <CopilotChat
-            agentId={AGENT_ID}
-            threadId={threadId}
-            labels={{
-              chatInputPlaceholder:
-                "Ask about prices, forecasts, weather or agronomy…",
-            }}
-          />
-        </div>
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between border-b px-4 py-2">
+        <span className="text-sm font-medium">Agricultural assistant</span>
+        <WorkBudget />
       </div>
-    </CopilotKitProvider>
+      <div className="min-h-0 flex-1">
+        <CopilotChat
+          agentId={AGENT_ID}
+          threadId={threadId}
+          labels={{
+            chatInputPlaceholder:
+              "Ask about prices, forecasts, weather or agronomy…",
+          }}
+        />
+      </div>
+    </div>
   );
 }

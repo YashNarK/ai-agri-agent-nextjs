@@ -35,6 +35,19 @@ export class ChatRepository {
     });
   }
 
+  /**
+   * One session's messages, oldest first — the order a transcript is read
+   * in, and the order the chat UI rehydrates them in.
+   */
+  async listMessages(sessionId: string, limit = 200) {
+    const prisma = await getPrisma();
+    return prisma.chat_messages.findMany({
+      where: { session_id: sessionId },
+      orderBy: { created_at: "asc" },
+      take: limit,
+    });
+  }
+
   /** Writes the human + AI messages for one turn in a single round trip. */
   async persistTurn({
     sessionId,

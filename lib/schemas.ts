@@ -313,6 +313,24 @@ export interface ChatResponse {
   sources?: Record<string, unknown>[] | null;
 }
 
+/**
+ * One persisted turn-half, as the chat UI rehydrates it.
+ *
+ * `role` is already mapped to the AG-UI vocabulary ("user"/"assistant")
+ * rather than the database's ("human"/"ai") — the mapping belongs on the
+ * server, so the client never has to know two spellings of the same idea.
+ */
+export interface TranscriptMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface TranscriptResponse {
+  session_id: string;
+  messages: TranscriptMessage[];
+}
+
 export interface SessionSchema {
   id: string;
   user_id: string | null;
