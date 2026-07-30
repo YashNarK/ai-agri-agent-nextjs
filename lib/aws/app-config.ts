@@ -118,11 +118,42 @@ export interface AppConfig {
 let _secretsClient: SecretsManagerClient | undefined;
 let _ssmClient: SSMClient | undefined;
 
-const secretsClient = (): SecretsManagerClient =>
-  (_secretsClient ??= new SecretsManagerClient({ region: settings.AWS_REGION }));
+/**
+ * Credentials read from our own variable names, or undefined to leave the
+ * SDK's default provider chain in place.
+ *
+ * $AWS_ACCESS_KEY_ID, $AWS_SECRET_ACCESS_KEY and $AWS_SESSION_TOKEN are
+ * reserved Lambda runtime variables — the same trap as $AWS_REGION, one
+ * layer down (see lib/config/settings.ts). Vercel functions run on Lambda,
+ * whose runtime injects its own execution-role trio. The default chain then
+ * assembles a *mixture*: our static key and secret from the project config,
+ * the platform's session token alongside them. AWS rejects that combination
+ * with UnrecognizedClientException — a static key ID does not go with someone
+ * else's session token. $APP_AWS_* names are ours alone, and passing them
+ * explicitly keeps the runtime's values out of the credential entirely.
+ *
+ * Returning undefined when unset is deliberate: it restores the default
+ * chain, which is how IAM roles on real AWS compute (and `aws configure`
+ * locally) are meant to work.
+ */
+function explicitCredentials() {
+  const accessKeyId = process.env.APP_AWS_ACCESS_KEY_ID?.trim();
+  const secretAccessKey = process.env.APP_AWS_SECRET_ACCESS_KEY?.trim();
+  const sessionToken = process.env.APP_AWS_SESSION_TOKEN?.trim();
 
-const ssmClient = (): SSMClient =>
-  (_ssmClient ??= new SSMClient({ region: settings.AWS_REGION }));
+  if (!accessKeyId || !secretAccessKey) return undefined;
+  return { accessKeyId, secretAccessKey, sessionToken };
+}
+
+const clientConfig = () => ({
+  region: settings.AWS_REGION,
+  credentials: explicitCredentials(),
+});
+
+const secretsClient = (): SecretsManagerClient =>
+  (_secretsClient ??= new SecretsManagerClient(clientConfig()));
+
+const ssmClient = (): SSMClient => (_ssmClient ??= new SSMClient(clientConfig()));
 
 /**
  * Fetches and parses a JSON secret from Secrets Manager.
