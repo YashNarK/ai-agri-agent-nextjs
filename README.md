@@ -66,12 +66,120 @@ process.
 
 ### pgvector and Prisma
 
-`agronomic_knowledge.embedding` is `Unsupported("vector")` — Prisma cannot read,
-write or filter it. All similarity search therefore goes through
-`$queryRawUnsafe` with bound parameters and the `<=>` cosine-distance operator
+`agronomic_knowledge.embedding` is `Unsupported("vector")` and `search_tsv` is
+`Unsupported("tsvector")` — Prisma cannot read, write or filter either. All
+retrieval therefore goes through `$queryRawUnsafe` with bound parameters
 (`repositories/knowledge.repository.ts`), and the embedding backfill writes via
 `$executeRawUnsafe`. This mirrors the Python app, which used raw SQL through
 SQLAlchemy for the same reason.
+
+## Retrieval is hybrid
+
+The R in RAG is the part the generator cannot recover from: no amount of prompt
+work rescues an answer whose supporting document was never retrieved. So search
+runs two retrievers with opposite blind spots and fuses their rankings.
+
+| | matches | blind to |
+| --- | --- | --- |
+| **Dense** — pgvector over Azure OpenAI embeddings | meaning: "lower leaves yellowing" → *nitrogen deficiency* | rare literal tokens. A varietal name, `NPK 20-20-20` or *Puccinia triticina* is pulled toward the topic of the sentence around it, so the one article naming it does not reliably outrank ten that merely discuss the subject |
+| **Lexical** — Postgres full-text over a generated `tsvector` | exact terms and quoted phrases | paraphrase. No shared stem, no hit, however obviously the article answers |
+
+Which one wins depends on the query, not the corpus — so picking one per
+deployment is picking wrong for half the traffic.
+
+**Fusion is by rank, not score** (`RRF_K = 60`, Cormack et al. 2009). Cosine
+similarity and `ts_rank_cd` are not the same kind of number: cosine lives in a
+narrow band near the top, `ts_rank_cd` is unbounded and length-dependent.
+Normalising them onto a shared scale — min-max over the result set, say — makes
+the fused score depend on which *other* documents happened to be retrieved, so
+an eleventh candidate can reorder the top three. RRF discards magnitudes and
+keeps only what each retriever is reliable about, its ordering: a document
+contributes `1/(60 + rank)` per branch. With k that large, agreement between the
+two retrievers beats a narrow win in either — which is the entire point of
+running both.
+
+Both branches and the join are a single statement (`searchHybrid`). Two details
+in it are load-bearing:
+
+- **Rank outside the LIMIT.** A window function in the same query level is
+  evaluated over every matching row — a full sort, and the end of any ivfflat
+  index scan. Each branch orders and limits in a subquery, then numbers those
+  rows.
+- **Filters are pasted into both branches, not factored into a shared CTE.** A
+  CTE referenced twice is materialised, and scanning a materialised result
+  cannot use the ivfflat or GIN index. Two copies of one predicate is the
+  cheaper duplication.
+
+### The parse that would have made the lexical branch useless
+
+`websearch_to_tsquery` parses the lexical side: it takes what people already
+type — quoted phrases, `OR`, `-excluded` — and never throws on malformed input,
+where `to_tsquery` turns a stray `&` into a 500. It also **ANDs** the terms it
+finds, which is right for a search box and catastrophic for a question:
+
+```
+"how do I manage rust disease in wheat?"
+  → 'manag' & 'rust' & 'diseas' & 'wheat'   → 0 rows
+  → 'manag' | 'rust' | 'diseas' | 'wheat'   → 78 rows
+```
+
+Every natural-language probe against the live knowledge base returned **zero**
+rows under the conjunctive parse. Shipped as-is, the lexical branch would have
+contributed nothing to fusion and hybrid search would have been dense search
+with extra steps — passing review, passing a smoke test, and quietly doing
+nothing.
+
+So the tsquery is built as *conjunctive, falling back to disjunctive only when
+the conjunctive parse matches nothing* (one `EXISTS` probe on the GIN index,
+evaluated once as an InitPlan). Documents matching more of the query still sort
+first, because that is what `ts_rank_cd` measures — the fallback widens what is
+retrievable without flattening the order.
+
+The rewrite is a regex over the parsed tsquery's text, and the negative lookahead
+in it is load-bearing: `' & '` becomes `' | '` **except** before `!`, so
+`wheat -maize` keeps excluding maize instead of turning the exclusion into an
+alternative that matches almost everything (19 rows, not 173).
+
+### Failing fast enough for the fallback to matter
+
+The first working version of the fallback hung for a minute. LangChain's
+embedding client retries six times with exponential backoff, so "hybrid degrades
+gracefully" meant *the user waits out six doomed requests, then gets keyword
+results* — the same hung page, plus the bill.
+
+Query embeddings therefore run under their own limits (`maxRetries: 1`,
+`timeout: 8s`, `QUERY_EMBEDDING_LIMITS`) against a call that normally returns in
+well under a second, while the embedding **backfill** keeps the patient defaults:
+it is a background job with nobody waiting, and riding out a 429 is exactly what
+it should do. Two callers, opposite needs, so the client cache is keyed by the
+limits as well as the deployment.
+
+### Modes, and the fallback
+
+`mode` is `hybrid` (default), `semantic` or `keyword`, on `POST /api/search` and
+as `?mode=` on `/dashboard/knowledge`. The knowledge page exposes it as a
+selector, because hybrid retrieval is otherwise unfalsifiable from the outside:
+running one query three ways is how anyone checks that fusion is earning its
+place rather than reproducing what one branch already returned.
+
+Keyword mode calls no external service and costs nothing, which makes it a real
+fallback: **a hybrid search whose embedding call fails does not fail**. It
+returns its lexical half and reports `degraded` — the UI says "keyword matches
+only", the MCP tool says it in the payload. `semantic` mode still throws, because
+asking for that retriever by name and silently getting a different one would be
+answering a question nobody asked.
+
+Every result carries `matched_by` (`both` / `semantic` / `keyword`) and its
+per-branch ranks. That distinction is not decoration: a document ranked 3rd and
+4th by the two branches outranks one ranked 1st by a single branch, so a reader
+shown only the cosine number would conclude the opposite of what the ordering
+says.
+
+The lexical column and its GIN index are `sql/10_hybrid_search.sql` — a
+`GENERATED ALWAYS AS ... STORED` tsvector, `setweight`ed so a title hit counts
+for more than a body hit, maintained by Postgres rather than by a trigger
+nobody remembers. **It must be applied before deploying this code**; hybrid is
+the default, and the query references a column that would not yet exist.
 
 ## Configuration
 
@@ -117,7 +225,7 @@ npm run typecheck
 Schema and data tooling:
 
 ```bash
-npm run db:schema        # apply sql/01..09 in order
+npm run db:schema        # apply sql/01..10 in order
 npm run db:pull          # re-introspect Neon into prisma/schema.prisma
 npm run seed:embeddings  # backfill agronomic_knowledge.embedding (idempotent)
 npm run hash:password -- '<password>'   # base64 bcrypt hash for ADMIN_PASSWORD_HASH
@@ -139,7 +247,7 @@ npm run hash:password -- '<password>'   # base64 bcrypt hash for ADMIN_PASSWORD_
 | GET | `/api/indicators` | macro series; `names`, `date_from`, `date_to`, `limit` |
 | GET | `/api/products` | `crop_code`, `category`, `search`, `limit`; returns `categories` too |
 | POST | `/api/predictions` | 201; 404 / 422 / 502 on failure |
-| POST | `/api/search` | pgvector semantic search |
+| POST | `/api/search` | hybrid retrieval; `mode` = `hybrid` \| `semantic` \| `keyword` |
 | POST | `/api/chat` | full answer, all tool calls collected |
 | POST | `/api/chatstream` | SSE: `token` · `tool` · `notice` · `error` · `done` |
 | GET | `/api/chat/sessions/{session_id}` | 404 if unknown *or* not yours |
@@ -169,7 +277,7 @@ paths run the same compiled graph against the same checkpointer.
 | `/dashboard/crops`, `/dashboard/crops/{code}` | catalog grouped by category; per-crop detail with yields |
 | `/dashboard/regions`, `/dashboard/regions/{code}` | region map; per-region detail with weather |
 | `/dashboard/forecasts` | run an Azure ML prediction, then inspect the feature row behind it |
-| `/dashboard/knowledge` | semantic search over the agronomic knowledge base |
+| `/dashboard/knowledge` | hybrid search over the knowledge base, with a retriever selector |
 | `/dashboard/assistant` | the chat agent, with a per-user conversation switcher |
 | `/dashboard/admin/users` | the approval queue |
 | `/docs`, `/docs-mcp` | endpoint index and MCP tool catalog |

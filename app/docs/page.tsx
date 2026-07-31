@@ -39,7 +39,9 @@ const ENDPOINTS: { method: string; path: string; description: string }[] = [
   {
     method: "POST",
     path: "/api/search",
-    description: "Semantic search over the agronomic knowledge base",
+    description:
+      "Hybrid search over the agronomic knowledge base — vector similarity " +
+      "and full-text, fused (mode: hybrid | semantic | keyword)",
   },
   {
     method: "POST",

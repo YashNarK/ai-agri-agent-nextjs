@@ -69,19 +69,22 @@ export const TOOLS: ToolDoc[] = [
     name: "search_crop_knowledge",
     signature:
       "search_crop_knowledge(query: string, crop_code?: string | null) -> object",
-    summary: "Semantic (RAG) search over the agronomic knowledge base.",
+    summary: "Hybrid (RAG) search over the agronomic knowledge base.",
     description:
-      "Embeds the query with the Azure OpenAI embedding model and runs a " +
-      "pgvector cosine-similarity search over the agronomic_knowledge table. " +
-      "Returns the most relevant articles about crop management, pest control, " +
-      "disease management, soil health and best practices, ranked by similarity. " +
-      "Pass an optional crop_code to restrict results to a single crop.",
+      "Runs two retrievers and fuses their rankings: a pgvector " +
+      "cosine-similarity search over the query's Azure OpenAI embedding, and " +
+      "a Postgres full-text search over the article text. Meaning and exact " +
+      "wording therefore both retrieve — a paraphrased question finds the " +
+      "right article, and a pathogen name or fertiliser ratio finds the " +
+      "article that names it. Pass the caller's specific terms through " +
+      "verbatim rather than paraphrasing them. Optional crop_code restricts " +
+      "results to a single crop.",
     params: [
       {
         name: "query",
         type: "string",
         required: true,
-        desc: "Natural-language search text, e.g. 'nitrogen management for maize'.",
+        desc: "Search text, e.g. 'nitrogen management for maize' or 'Puccinia triticina'.",
       },
       {
         name: "crop_code",
@@ -91,8 +94,13 @@ export const TOOLS: ToolDoc[] = [
       },
     ],
     returns:
-      "An object with `query`, `crop_code`, `count`, and `results` — each result " +
-      "has id, title, content, category, source and a similarity score (0–1).",
+      "An object with `query`, `crop_code`, `mode`, `degraded`, `count` and " +
+      "`results`. Each result has id, title, content, category, source, a " +
+      "similarity score (0–1), the fused `score`, and `matched_by` — one of " +
+      "both | semantic | keyword, i.e. which retriever surfaced it. `mode` " +
+      "reports what actually ran: it reads \"keyword\" with `degraded` set " +
+      "when the embedding service was unreachable and only the lexical half " +
+      "of the search executed.",
     exampleArgs: {
       query: "how to manage rust disease in wheat",
       crop_code: "WHEAT-W",
@@ -100,6 +108,8 @@ export const TOOLS: ToolDoc[] = [
     exampleResponse: {
       query: "how to manage rust disease in wheat",
       crop_code: "WHEAT-W",
+      mode: "hybrid",
+      degraded: null,
       count: 1,
       results: [
         {
@@ -109,6 +119,8 @@ export const TOOLS: ToolDoc[] = [
           category: "disease_control",
           source: "Agronomy",
           similarity: 0.89,
+          score: 0.0325,
+          matched_by: "both",
         },
       ],
     },
@@ -217,7 +229,7 @@ export const TOOLS: ToolDoc[] = [
     signature:
       "get_agronomic_advice(crop_code: string, issue: string) -> object",
     summary:
-      "Evidence-based advice for a specific crop issue, via semantic search.",
+      "Evidence-based advice for a specific crop issue, via hybrid search.",
     description:
       "Searches the knowledge base for guidance on a specific issue for a crop. " +
       "First tries crop-specific articles; if none are found it falls back to " +
@@ -257,6 +269,7 @@ export const TOOLS: ToolDoc[] = [
           category: "fertilization",
           source: "Agronomy",
           similarity: 0.86,
+          matched_by: "both",
         },
       ],
     },

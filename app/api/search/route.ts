@@ -1,16 +1,18 @@
 // ============================================================
 // app/api/search/route.ts
 //
-// POST /api/search — vector similarity search over the agronomic
-// knowledge base using Azure OpenAI embeddings and pgvector.
+// POST /api/search — hybrid retrieval over the agronomic knowledge
+// base: pgvector similarity and Postgres full-text search, fused.
 //
-// The query is embedded into a high-dimensional vector and compared
-// against stored document embeddings. The most semantically similar
-// documents are returned, ranked by cosine similarity.
+// Optional: crop_code, category, top_k (default 5, max 20), and
+// `mode` — "hybrid" (default), "semantic" or "keyword".
 //
-// Optional filters: crop_code, category, top_k (default 5, max 20).
+// The response reports the mode that ACTUALLY ran alongside the
+// results, because hybrid falls back to its keyword half when the
+// query cannot be embedded. A client that renders relevance needs to
+// know which retrievers produced the ordering it is showing.
 //
-// Port of routers/search.py
+// Extends routers/search.py, which was dense-only.
 // ============================================================
 
 import { NextResponse } from "next/server";
@@ -25,8 +27,10 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    // Every query embeds the search text through Azure OpenAI before it
-    // touches pgvector, so this endpoint bills per call.
+    // Every mode but "keyword" embeds the search text through Azure
+    // OpenAI, so this endpoint bills per call. Guarded uniformly rather
+    // than per mode: a free path into the same corpus, reachable by
+    // flipping one request field, would make the guard decorative.
     await requireApprovedApi();
 
     const parsed = searchRequestSchema.safeParse(await request.json());
@@ -34,21 +38,28 @@ export async function POST(request: Request) {
       throw new ApiError(422, parsed.error.issues[0].message);
     }
 
-    const { query, crop_code, category, top_k } = parsed.data;
-    const config = await loadAppConfig();
+    const { query, crop_code, category, top_k, mode } = parsed.data;
 
-    const results = await searchService.semanticSearch({
+    // Keyword search reaches no external service, so it must not be
+    // held hostage to a config load that only the other modes need —
+    // that is the whole point of having it as a fallback.
+    const config = mode === "keyword" ? undefined : await loadAppConfig();
+
+    const outcome = await searchService.search({
       query,
-      config: config.azureOpenAI,
+      config: config?.azureOpenAI,
       cropCode: crop_code,
       category,
       topK: top_k,
+      mode,
     });
 
     const response: SearchResponse = {
       query,
-      results,
-      total: results.length,
+      results: outcome.results,
+      total: outcome.results.length,
+      mode: outcome.mode,
+      degraded: outcome.degraded,
     };
 
     return NextResponse.json(response);

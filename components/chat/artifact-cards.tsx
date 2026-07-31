@@ -20,6 +20,7 @@ import {
   type PricePoint,
 } from "@/components/charts/price-history-chart";
 import { SimilarityBar } from "@/components/charts/similarity-bar";
+import { MatchBadge } from "@/components/match-badge";
 import { formatDecimal, formatUsdPrecise } from "@/components/charts/format";
 import { MARKS, seriesColor } from "@/components/charts/theme";
 import { Badge } from "@/components/ui/badge";
@@ -140,23 +141,33 @@ function PriceHistoryCard({ artifact }: { artifact: PriceHistoryArtifact }) {
 
 // ------------------------------------------------------------
 function KnowledgeCard({ artifact }: { artifact: KnowledgeArtifact }) {
+  const caption = artifact.degraded
+    ? `Keyword-only search for “${artifact.query}” — the query could not be embedded`
+    : artifact.mode === "hybrid"
+      ? `Hybrid search for “${artifact.query}” — meaning and wording, fused`
+      : `Search for “${artifact.query}”`;
+
   return (
-    <Frame
-      title="Knowledge base matches"
-      caption={`Semantic search for “${artifact.query}”`}
-    >
+    <Frame title="Knowledge base matches" caption={caption}>
       <ul className="space-y-3">
         {artifact.results.map((result, index) => (
           <li key={`${result.title}-${index}`} className="space-y-1.5">
             <div className="flex items-start justify-between gap-2">
               <span className="text-sm font-medium">{result.title}</span>
-              {result.category && (
-                <Badge variant="secondary" className="shrink-0">
-                  {result.category}
-                </Badge>
-              )}
+              <div className="flex shrink-0 items-center gap-1.5">
+                <MatchBadge matchedBy={result.matched_by} />
+                {result.category && (
+                  <Badge variant="secondary">{result.category}</Badge>
+                )}
+              </div>
             </div>
-            <SimilarityBar value={result.similarity} />
+            {/* Absent only in keyword-only mode, where there is no query
+                vector and so no distance to report. Rendering a zeroed
+                bar there would claim "no similarity" when the truth is
+                "not measured". */}
+            {result.similarity !== null && (
+              <SimilarityBar value={result.similarity} />
+            )}
           </li>
         ))}
       </ul>

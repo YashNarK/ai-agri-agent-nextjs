@@ -270,14 +270,31 @@ export interface PredictionResponse {
 // ============================================================
 // SEARCH SCHEMAS
 // ============================================================
+/**
+ * Which retrievers run.
+ *
+ * `hybrid` is the default because it is the only one that does not have
+ * a known blind spot: dense search loses rare literal tokens, lexical
+ * search loses paraphrase. The other two are kept addressable rather
+ * than hidden — `semantic` is the old behaviour, and `keyword` is the
+ * one mode that costs nothing and needs no external service, which is
+ * what makes it a usable fallback rather than a curiosity.
+ */
+export const searchModeSchema = z.enum(["hybrid", "semantic", "keyword"]);
+export type SearchMode = z.infer<typeof searchModeSchema>;
+
 export const searchRequestSchema = z.object({
   query: z.string().min(1),
   crop_code: z.string().nullish(),
   category: z.string().nullish(),
   top_k: z.number().int().min(1).max(20).default(5),
+  mode: searchModeSchema.default("hybrid"),
 });
 
 export type SearchRequest = z.infer<typeof searchRequestSchema>;
+
+/** Which retrievers actually returned this row. */
+export type MatchedBy = "both" | "semantic" | "keyword";
 
 export interface SearchResult {
   id: number;
@@ -285,13 +302,34 @@ export interface SearchResult {
   content: string;
   category: string | null;
   source: string | null;
-  similarity: number;
+  /**
+   * Cosine similarity to the query embedding. Null only in keyword mode,
+   * where no query vector exists to measure against — in hybrid mode it
+   * is reported even for rows the vector search itself missed.
+   */
+  similarity: number | null;
+  /** ts_rank_cd of the row against the parsed query; null if the lexical branch did not match it. */
+  keyword_score: number | null;
+  /** The score `results` is ordered by: RRF in hybrid mode, the single retriever's score otherwise. */
+  score: number;
+  /** 1-based position within each retriever's own ranking, before fusion. */
+  semantic_rank: number | null;
+  keyword_rank: number | null;
+  matched_by: MatchedBy;
 }
 
 export interface SearchResponse {
   query: string;
   results: SearchResult[];
   total: number;
+  /** The mode that actually ran, which is not the requested one after a fallback. */
+  mode: SearchMode;
+  /**
+   * Set when hybrid search ran without its semantic half because the
+   * query could not be embedded. Present so a caller can say "these are
+   * keyword matches only" instead of quietly serving worse results.
+   */
+  degraded: { requested: SearchMode; reason: string } | null;
 }
 
 // ============================================================

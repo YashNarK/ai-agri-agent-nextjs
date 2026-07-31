@@ -18,6 +18,10 @@ model agronomic_knowledge {
   source         String?                @db.VarChar(200)
   published_date DateTime?              @db.Date
   embedding      Unsupported("vector")?
+  // Generated column maintained by Postgres (sql/10_hybrid_search.sql).
+  // Unsupported for the same reason as `embedding`: Prisma has no
+  // tsvector type, so the lexical half of hybrid search is raw SQL too.
+  search_tsv     Unsupported("tsvector")?
   metadata       Json?
   created_at     DateTime               @default(now()) @db.Timestamptz(6)
   crops          crops?                 @relation(fields: [crop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -25,6 +29,7 @@ model agronomic_knowledge {
 
   @@index([category, crop_id], map: "idx_agronomic_knowledge_category_crop")
   @@index([embedding], map: "idx_agronomic_knowledge_embedding")
+  @@index([search_tsv], map: "idx_agronomic_knowledge_search_tsv", type: Gin)
   @@schema("agricultural")
 }
 

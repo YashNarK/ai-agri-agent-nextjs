@@ -130,34 +130,50 @@ export function buildAgentTools(container: Container, config: AppConfig) {
   // ----------------------------------------------------------
   const searchAgronomicKnowledge = tool(
     async ({ query, crop_code }) => {
-      const results = await searchService.semanticSearch({
+      // Hybrid, so a question naming an exact term — a pathogen, a
+      // fertiliser ratio, a product — retrieves the article that names
+      // it rather than the five that are merely about the topic.
+      const { results, mode, degraded } = await searchService.search({
         query,
         config: config.azureOpenAI,
         cropCode: crop_code,
         topK: 5,
+        mode: "hybrid",
       });
 
       if (results.length === 0) {
         return ["No relevant agronomic knowledge found for this query.", null];
       }
 
+      // The relevance line stays in the prose the model reads. It is
+      // how the model can tell a strong match from a weak one, which is
+      // what stops it presenting rank-five filler with the same
+      // confidence as a direct hit.
       const prose = results
-        .map(
-          (row) =>
+        .map((row) => {
+          const relevance =
+            row.similarity === null
+              ? `Matched by: keyword`
+              : `Similarity: ${row.similarity.toFixed(2)} | Matched by: ${row.matched_by}`;
+          return (
             `[${row.category || "General"}] ${row.title}\n` +
             `${row.content.slice(0, 500)}\n` +
-            `Source: ${row.source || "Unknown"} | Similarity: ${row.similarity.toFixed(2)}`,
-        )
+            `Source: ${row.source || "Unknown"} | ${relevance}`
+          );
+        })
         .join("\n\n---\n\n");
 
       const artifact: KnowledgeArtifact = {
         kind: "knowledge",
         query,
+        mode,
+        degraded: degraded !== null,
         results: results.map((row) => ({
           title: row.title,
           category: row.category,
           source: row.source,
           similarity: row.similarity,
+          matched_by: row.matched_by,
           excerpt: row.content.slice(0, 500),
         })),
       };
@@ -172,6 +188,9 @@ export function buildAgentTools(container: Container, config: AppConfig) {
         "pest control, disease management, soil health, irrigation and best practices. " +
         "Use this when the user asks how to grow crops, manage diseases or pests, " +
         "improve yields, or any agronomic best-practice question. " +
+        "Matches both meaning and exact wording, so include any specific " +
+        "terms the user used — a pathogen name, a fertiliser ratio, a " +
+        "product — verbatim in the query rather than paraphrasing them. " +
         "Returns relevant knowledge articles ranked by relevance.",
       schema: z.object({
         query: z.string().describe("The agronomic question to search for"),

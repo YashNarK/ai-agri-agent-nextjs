@@ -79,27 +79,37 @@ const handler = createMcpHandler(
     // --------------------------------------------------------
     server.tool(
       "search_crop_knowledge",
-      "Search the agronomic knowledge base (semantic / RAG search). " +
+      "Search the agronomic knowledge base (hybrid RAG search). " +
         "Returns relevant articles about crop management, pest control, " +
         "disease management, soil health and best practices, ranked by " +
-        "cosine similarity. crop_code is optional (e.g. WHEAT-W, MAIZE, " +
-        "SORGHUM); call list_available_data for valid codes.",
+        "fusing vector similarity with full-text relevance — so exact " +
+        "terms (a pathogen name, a fertiliser ratio) match as well as " +
+        "paraphrases do. Pass the user's specific wording through " +
+        "verbatim. Each result reports matched_by: both | semantic | " +
+        "keyword. crop_code is optional (e.g. WHEAT-W, MAIZE, SORGHUM); " +
+        "call list_available_data for valid codes.",
       {
         query: z.string(),
         crop_code: z.string().nullish(),
       },
       async ({ query, crop_code }) => {
         const config = await loadAppConfig();
-        const results = await container.searchService.semanticSearch({
+        const { results, mode, degraded } = await container.searchService.search({
           query,
           config: config.azureOpenAI,
           cropCode: crop_code,
           topK: 5,
+          mode: "hybrid",
         });
 
         return json({
           query,
           crop_code: crop_code ?? null,
+          // The client is another AI system, so a silent fallback is
+          // worse here than in the UI: it would present keyword-only
+          // recall as the full result and never know to say so.
+          mode,
+          degraded: degraded?.reason ?? null,
           count: results.length,
           results,
         });
@@ -184,7 +194,7 @@ const handler = createMcpHandler(
     // --------------------------------------------------------
     server.tool(
       "get_agronomic_advice",
-      "Get agronomic advice for a specific crop issue via semantic search. " +
+      "Get agronomic advice for a specific crop issue via hybrid search. " +
         "issue examples: rust_disease, nitrogen_deficiency, irrigation_scheduling. " +
         "Returns evidence-based recommendations drawn from the knowledge base.",
       {
@@ -196,23 +206,25 @@ const handler = createMcpHandler(
         const query = issue.replace(/_/g, " ").trim();
 
         let scope = "crop_specific";
-        let results = await container.searchService.semanticSearch({
+        let { results } = await container.searchService.search({
           query,
           config: config.azureOpenAI,
           cropCode: crop_code,
           topK: 3,
+          mode: "hybrid",
         });
 
         // graceful fallback: no crop-specific article → return general
         // best-practice guidance instead of nothing (never fabricate)
         if (results.length === 0) {
           scope = "general";
-          results = await container.searchService.semanticSearch({
+          ({ results } = await container.searchService.search({
             query,
             config: config.azureOpenAI,
             cropCode: null,
             topK: 3,
-          });
+            mode: "hybrid",
+          }));
         }
 
         if (results.length === 0) {

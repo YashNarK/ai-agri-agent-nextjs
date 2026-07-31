@@ -81,11 +81,22 @@ export interface ForecastArtifact {
 export interface KnowledgeArtifact {
   kind: "knowledge";
   query: string;
+  /** Which retrievers ran — "keyword" alone means the embedding call failed. */
+  mode: "hybrid" | "semantic" | "keyword";
+  degraded: boolean;
   results: {
     title: string;
     category: string | null;
     source: string | null;
-    similarity: number;
+    /** Null only when no query vector existed to measure against. */
+    similarity: number | null;
+    /**
+     * Which retriever(s) surfaced this row. Shown in the transcript
+     * because "both retrievers agreed" is a materially stronger claim
+     * than "one of them ranked it fifth", and the reader is entitled to
+     * that distinction when deciding whether to trust the citation.
+     */
+    matched_by: "both" | "semantic" | "keyword";
     excerpt: string;
   }[];
 }

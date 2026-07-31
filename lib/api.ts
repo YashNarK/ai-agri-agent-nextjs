@@ -11,6 +11,8 @@
 // for Client Components.
 // ============================================================
 
+import type { AzureOpenAIConfig } from "@/lib/aws/app-config";
+import type { SearchMode } from "@/lib/schemas";
 import {
   cropsService,
   indicatorsService,
@@ -77,21 +79,27 @@ export async function getPrediction(id: number) {
 }
 
 /**
- * Semantic search. Unlike everything else here this DOES call out —
- * Azure OpenAI, to embed the query — so it can fail independently of
- * the database.
+ * Hybrid knowledge search. Unlike everything else here this DOES call
+ * out — Azure OpenAI, to embed the query — so it can fail independently
+ * of the database.
+ *
+ * Returns the outcome rather than bare results: the caller has to know
+ * whether it is rendering a fused ranking or the keyword half on its
+ * own after a fallback.
  */
 export async function searchKnowledge(
   query: string,
   cropCode?: string | null,
   topK = 5,
+  mode: SearchMode = "hybrid",
 ) {
-  const { loadAppConfig } = await import("@/lib/aws/app-config");
-  const config = await loadAppConfig();
-  return searchService.semanticSearch({
-    query,
-    config: config.azureOpenAI,
-    cropCode,
-    topK,
-  });
+  // Only resolved when a query vector is actually needed, so keyword
+  // search keeps working on a box with no AWS credentials at all.
+  let config: AzureOpenAIConfig | undefined;
+  if (mode !== "keyword") {
+    const { loadAppConfig } = await import("@/lib/aws/app-config");
+    config = (await loadAppConfig()).azureOpenAI;
+  }
+
+  return searchService.search({ query, config, cropCode, topK, mode });
 }

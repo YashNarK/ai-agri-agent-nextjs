@@ -3,9 +3,16 @@
 // ============================================================
 // app/dashboard/knowledge/search-form.tsx
 //
-// Search input and crop filter. Submits by navigating, so the query
-// lands in the URL and the results stay a Server Component — no client
-// fetching, no loading state to hand-manage beyond the transition.
+// Search input, crop filter and retriever selector. Submits by
+// navigating, so the query lands in the URL and the results stay a
+// Server Component — no client fetching, no loading state to
+// hand-manage beyond the transition.
+//
+// The retriever selector is exposed rather than kept internal because
+// hybrid retrieval is otherwise unfalsifiable from the outside: running
+// the same query three ways is how anyone — reviewer, or us — checks
+// that fusion is actually earning its place instead of reproducing what
+// one branch already returned.
 // ============================================================
 
 import { useRouter } from "next/navigation";
@@ -20,22 +27,32 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import type { SearchMode } from "@/lib/schemas";
 
 const ALL_CROPS = "__all__";
+
+const MODES: { value: SearchMode; label: string }[] = [
+  { value: "hybrid", label: "Meaning + wording" },
+  { value: "semantic", label: "Meaning only" },
+  { value: "keyword", label: "Wording only" },
+];
 
 export function SearchForm({
   crops,
   query,
   cropCode,
+  mode,
 }: {
   crops: { code: string; name: string }[];
   query: string;
   cropCode: string;
+  mode: SearchMode;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [value, setValue] = useState(query);
   const [crop, setCrop] = useState(cropCode || ALL_CROPS);
+  const [retriever, setRetriever] = useState<SearchMode>(mode);
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -44,6 +61,9 @@ export function SearchForm({
 
     const params = new URLSearchParams({ q: trimmed });
     if (crop !== ALL_CROPS) params.set("crop", crop);
+    // Omitted at the default, so the ordinary URL stays clean and a
+    // shared link does not pin a choice the sharer never made.
+    if (retriever !== "hybrid") params.set("mode", retriever);
 
     startTransition(() => router.push(`/dashboard/knowledge?${params}`));
   };
@@ -84,6 +104,26 @@ export function SearchForm({
           {crops.map((c) => (
             <SelectItem key={c.code} value={c.code}>
               {c.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      <Select
+        value={retriever}
+        onValueChange={(v) => v && setRetriever(v as SearchMode)}
+      >
+        <SelectTrigger className="w-full sm:w-[190px]" aria-label="Retriever">
+          <SelectValue>
+            {(value) =>
+              MODES.find((m) => m.value === value)?.label ?? String(value)
+            }
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {MODES.map((m) => (
+            <SelectItem key={m.value} value={m.value}>
+              {m.label}
             </SelectItem>
           ))}
         </SelectContent>

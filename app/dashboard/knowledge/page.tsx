@@ -1,14 +1,18 @@
 // ============================================================
 // app/dashboard/knowledge/page.tsx
 //
-// Semantic search over the agronomic knowledge base.
+// Hybrid search over the agronomic knowledge base: vector similarity
+// and full-text search, fused (services/search.service.ts).
 //
 // Unlike every other dashboard page, this one depends on an EXTERNAL
 // service: the query is embedded by Azure OpenAI before pgvector can
-// rank anything. So it fails independently of the database, and the
-// failure is surfaced as a real message rather than an empty result —
-// "no matches" and "the embedding service is unreachable" mean very
-// different things to a user.
+// rank anything. In hybrid mode that is survivable — the lexical half
+// still runs, and the page says so — so the hard failure card below is
+// now reached only in the explicit `semantic` mode.
+//
+// Each result carries WHY it is here (meaning, wording, or both),
+// because with two retrievers the ordering is no longer explained by
+// one number.
 //
 // The query lives in the URL, which keeps a search linkable and lets
 // the whole page stay a Server Component.
@@ -26,8 +30,10 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { MatchBadge } from "@/components/match-badge";
 import { requireApproved } from "@/lib/auth/guard";
 import { getCrops, searchKnowledge } from "@/lib/api";
+import { searchModeSchema, type SearchMode } from "@/lib/schemas";
 
 import { SearchForm } from "./search-form";
 
@@ -37,13 +43,15 @@ export const dynamic = "force-dynamic";
 async function Results({
   query,
   cropCode,
+  mode,
 }: {
   query: string;
   cropCode?: string;
+  mode: SearchMode;
 }) {
-  let results;
+  let outcome;
   try {
-    results = await searchKnowledge(query, cropCode ?? null, 8);
+    outcome = await searchKnowledge(query, cropCode ?? null, 8, mode);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     return (
@@ -76,6 +84,8 @@ async function Results({
     );
   }
 
+  const { results, degraded } = outcome;
+
   if (results.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -86,24 +96,51 @@ async function Results({
 
   return (
     <div className="space-y-4">
+      {/* A fallback that is not announced is indistinguishable from the
+          knowledge base having got worse. */}
+      {degraded && (
+        <Card className="border-amber-500/40">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm">
+              Keyword matches only — the semantic half is down
+            </CardTitle>
+            <CardDescription>
+              The query could not be embedded, so these are ranked by wording
+              alone. Articles that answer the question in different words are
+              missing from this list. The underlying error was:{" "}
+              <span className="font-mono">{degraded.reason}</span>
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      )}
+
       <p className="text-sm text-muted-foreground">
-        {results.length} articles, ranked by cosine similarity.
+        {results.length} articles, {RANKING_NOTE[outcome.mode]}.
       </p>
+
       {results.map((result) => (
         <Card key={result.id}>
           <CardHeader className="pb-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <CardTitle className="text-base">{result.title}</CardTitle>
-              {result.category && (
-                <Badge variant="secondary">{result.category}</Badge>
-              )}
+              <div className="flex items-center gap-2">
+                <MatchBadge matchedBy={result.matched_by} />
+                {result.category && (
+                  <Badge variant="secondary">{result.category}</Badge>
+                )}
+              </div>
             </div>
             <CardDescription>
               {result.source ?? "Unknown source"}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <SimilarityBar value={result.similarity} />
+            {/* Null only in keyword mode: no query vector, so no
+                distance was measured. A 0.00 bar would be a claim, and
+                the wrong one. */}
+            {result.similarity !== null && (
+              <SimilarityBar value={result.similarity} />
+            )}
             <p className="text-sm leading-relaxed text-muted-foreground">
               {result.content.slice(0, 400)}
               {result.content.length > 400 ? "…" : ""}
@@ -115,10 +152,16 @@ async function Results({
   );
 }
 
+const RANKING_NOTE: Record<SearchMode, string> = {
+  hybrid: "ranked by rank fusion across both retrievers",
+  semantic: "ranked by cosine similarity",
+  keyword: "ranked by full-text relevance",
+};
+
 export default async function KnowledgePage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; crop?: string }>;
+  searchParams: Promise<{ q?: string; crop?: string; mode?: string }>;
 }) {
   // Before anything is read: this page embeds the query through Azure
   // OpenAI. proxy.ts already redirects visitors with no session cookie,
@@ -129,6 +172,11 @@ export default async function KnowledgePage({
   const query = params.q?.trim() ?? "";
   const crops = await getCrops();
 
+  // The URL is user-editable, so the mode is parsed rather than cast —
+  // an unknown value falls back to the default instead of reaching the
+  // service as a string it does not handle.
+  const mode: SearchMode = searchModeSchema.catch("hybrid").parse(params.mode);
+
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
       <header className="space-y-1">
@@ -136,8 +184,9 @@ export default async function KnowledgePage({
           Agronomic knowledge
         </h1>
         <p className="text-sm text-muted-foreground">
-          Vector similarity search over the knowledge base. Ask in plain
-          language — this matches on meaning, not keywords.
+          Hybrid search over the knowledge base. Ask in plain language and it
+          matches on meaning; name an exact term — a pathogen, a fertiliser
+          ratio — and it matches that too.
         </p>
       </header>
 
@@ -145,11 +194,12 @@ export default async function KnowledgePage({
         crops={crops.crops.map((c) => ({ code: c.code, name: c.name }))}
         query={query}
         cropCode={params.crop ?? ""}
+        mode={mode}
       />
 
       {query ? (
         <Suspense
-          key={`${query}-${params.crop ?? ""}`}
+          key={`${query}-${params.crop ?? ""}-${mode}`}
           fallback={
             <div className="space-y-4">
               <Skeleton className="h-32 w-full rounded-xl" />
@@ -157,11 +207,13 @@ export default async function KnowledgePage({
             </div>
           }
         >
-          <Results query={query} cropCode={params.crop} />
+          <Results query={query} cropCode={params.crop} mode={mode} />
         </Suspense>
       ) : (
         <p className="text-sm text-muted-foreground">
-          Try “managing rust disease in wheat” or “nitrogen timing for maize”.
+          Try “managing rust disease in wheat” for a match on meaning, or
+          “Puccinia triticina” for one on wording. Switching the retriever
+          shows what each finds on its own.
         </p>
       )}
     </div>
