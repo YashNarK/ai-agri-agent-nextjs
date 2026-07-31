@@ -1,35 +1,27 @@
-# Agricultural Intelligence Platform — Next.js
+# Agricultural Intelligence Platform
 
-Price prediction, semantic search and an AI chat agent over agricultural
-commodity data. A TypeScript port of the production FastAPI service
-[`agri-ai-platform`](https://github.com/YashNarK/agri-ai-platform), pointing at the **same** Neon Postgres
-database, the same AWS Secrets Manager / SSM parameters, and the same Azure ML
-scoring endpoint.
+A working analytics product over agricultural commodity data: price history and
+seasonality, ML price forecasts, hybrid search over an agronomic knowledge base,
+and a chat agent that can reach all of it through tools.
 
-The port is no longer only an API. The Python service was headless; this one
-carries a dashboard on top of the same services — price explorer, forecasts,
-knowledge search and a chat assistant — so the endpoints below have a first
-consumer that ships with them. `/` redirects to `/dashboard`; the endpoint index
-lives at `/docs`, where FastAPI puts its own.
+One Next.js application holds all of it — the dashboard people use, the REST API
+other systems call, and an MCP server other AI systems call. `/` opens the
+dashboard; `/docs` lists the endpoints; `/docs-mcp` documents the agent tools.
 
-## Stack mapping
+## Stack
 
-| Python service            | This service                          |
-| ------------------------- | ------------------------------------- |
-| FastAPI routers           | Next.js App Router `app/api/**/route.ts` |
-| SQLAlchemy async ORM      | Prisma 7 + `@prisma/adapter-neon`     |
-| Pydantic schemas          | zod (requests) + TS interfaces (responses) |
-| `HTTPException`           | `ApiError` + `toErrorResponse`        |
-| `Depends()` DI            | `lib/container.ts` composition root   |
-| lifespan startup          | memoised lazy loaders                 |
-| FastMCP (`/mcp`)          | `mcp-handler` (`/api/mcp/[transport]`) |
-| LangGraph (Python)        | LangGraph JS                          |
-| `sse-starlette`           | `ReadableStream` + SSE headers        |
-| Neon Postgres             | Neon Postgres (unchanged)             |
-| Secrets Manager + SSM     | Secrets Manager + SSM (unchanged)     |
-| `/docs` (Swagger UI)      | `app/docs/page.tsx` (static index)    |
-| `routers/mcp_docs.py`     | `app/docs-mcp/page.tsx`               |
-| — (no UI)                 | App Router dashboard, shadcn/ui, D3   |
+| Concern | Choice |
+| --- | --- |
+| Framework | Next.js 16 (App Router), React 19 |
+| Database | Neon Postgres + pgvector, Prisma 7 with `@prisma/adapter-neon` |
+| Agent | LangGraph JS (ReAct), Azure OpenAI, `PostgresSaver` checkpointer |
+| Chat transport | CopilotKit v2 runtime over a hand-written AG-UI bridge |
+| Forecasting | Azure ML managed endpoint |
+| Machine clients | `mcp-handler` at `/api/mcp/[transport]` |
+| Validation | zod for every request boundary |
+| UI | shadcn/ui + Tailwind, D3 scales with React rendering |
+| Auth | Auth.js v5, GitHub OAuth + an admin credentials provider |
+| Config | AWS Secrets Manager + SSM Parameter Store, resolved at runtime |
 
 ## Architecture
 
@@ -46,32 +38,41 @@ agents/                 LangGraph ReAct agent: state, tools, nodes, graph,
                         plus the AG-UI bridge and tool artifacts
 lib/                    config, AWS, Prisma client, errors, schemas, auth,
                         server-side fetchers (lib/api.ts), container
-sql/                    DDL that predates Prisma (extensions, partitions, ivfflat)
+sql/                    DDL Prisma's schema language cannot express
 scripts/                sql-runner, embedding backfill, password hasher
 ```
 
-### Why there is no lifespan
+Dependencies are wired in one composition root (`lib/container.ts`): routes and
+pages receive services, services receive repositories, and nothing constructs its
+own database handle. That is what keeps `services/` free of framework imports and
+testable without a request.
 
-FastAPI resolved config, the DB engine and the compiled agent graph once at
-startup and hung them on `app.state`. Route handlers have no equivalent hook, so
-each of those is a **memoised promise** resolved on first use and reused for the
-process lifetime:
+### Expensive singletons, without a startup hook
 
-- `loadAppConfig()` — `lib/aws/app-config.ts`
+Route handlers have no lifespan event to hang shared state on, and a serverless
+process may be created for a single request. So the three costly things are
+**memoised promises**, resolved on first use and reused for the life of the
+process:
+
+- `loadAppConfig()` — `lib/aws/app-config.ts` (Secrets Manager + SSM)
 - `getPrisma()` — `lib/prisma.ts`
-- `getAgentGraph()` — `agents/graph.ts`
+- `getAgentGraph()` — `agents/graph.ts` (compiles the graph, runs `.setup()`)
 
 A rejected load is never cached, so a transient AWS blip does not poison the
-process.
+process for as long as it lives.
 
-### pgvector and Prisma
+### Raw SQL, and where it is unavoidable
 
 `agronomic_knowledge.embedding` is `Unsupported("vector")` and `search_tsv` is
-`Unsupported("tsvector")` — Prisma cannot read, write or filter either. All
-retrieval therefore goes through `$queryRawUnsafe` with bound parameters
-(`repositories/knowledge.repository.ts`), and the embedding backfill writes via
-`$executeRawUnsafe`. This mirrors the Python app, which used raw SQL through
-SQLAlchemy for the same reason.
+`Unsupported("tsvector")` — Prisma can neither read, write nor filter either
+type. All retrieval therefore goes through `$queryRawUnsafe` with bound
+parameters (`repositories/knowledge.repository.ts`), and the embedding backfill
+writes via `$executeRawUnsafe`. Everything else in the app is typed Prisma.
+
+The same boundary explains `sql/`: extensions, the partitioned price table, the
+ivfflat and GIN indexes and the generated tsvector column are things Prisma
+introspects rather than creates, so numbered DDL files stay the source of truth
+and `prisma db pull` follows them.
 
 ## Retrieval is hybrid
 
@@ -177,59 +178,97 @@ says.
 
 The lexical column and its GIN index are `sql/10_hybrid_search.sql` — a
 `GENERATED ALWAYS AS ... STORED` tsvector, `setweight`ed so a title hit counts
-for more than a body hit, maintained by Postgres rather than by a trigger
-nobody remembers. **It must be applied before deploying this code**; hybrid is
-the default, and the query references a column that would not yet exist.
+for more than a body hit, maintained by Postgres rather than by a trigger nobody
+remembers.
 
-## Configuration
+## The web app
 
-Only AWS credentials belong in `.env` — see `.env.example`. Everything else
-resolves at runtime:
+| Route | What it is |
+| --- | --- |
+| `/dashboard` | coverage tiles and macro indicators as small multiples |
+| `/dashboard/prices` | price history, seasonality heatmap, crop correlation matrix |
+| `/dashboard/crops`, `/dashboard/crops/{code}` | catalog grouped by category; per-crop detail with yields |
+| `/dashboard/regions`, `/dashboard/regions/{code}` | region map; per-region detail with weather |
+| `/dashboard/forecasts` | run a prediction, then inspect the feature row behind it |
+| `/dashboard/knowledge` | hybrid search over the knowledge base, with a retriever selector |
+| `/dashboard/assistant` | the chat agent, with a per-user conversation switcher |
+| `/dashboard/admin/users` | the approval queue |
+| `/docs`, `/docs-mcp` | endpoint index and MCP tool catalog |
 
-- **Secrets Manager** — `prod/agri/database`, `prod/agri/azure-openai`,
-  `prod/agri/azure-ml`
-- **SSM Parameter Store** — `/prod/agri/{embed,chat}-model-name`,
-  `/prod/agri/{embed,chat}-api-version`, `/prod/agri/db-schema`
+Three conventions hold across the pages:
 
-On AWS compute, drop the keys and use an IAM role.
+- **Server Components by default.** Pages call the services directly through
+  `lib/api.ts` rather than fetching our own HTTP routes — the route handler would
+  only parse a URL we just built and call the same service, so the round trip
+  buys a serialisation hop and a second failure mode. The client bundle carries
+  only pickers and chart interaction layers.
+- **State lives in the URL.** Selected crop/region, search query and chat thread
+  are query params, not component state — so every view is linkable, the back
+  button works, and a reload restores what you were looking at.
+- **Charts are D3 scales, React rendering.** `components/charts/` uses
+  `d3-scale`/`d3-shape` for the maths and JSX for the marks; no charting library
+  owns the DOM.
 
-### Pooled vs direct connections
+### Generative UI in the transcript
 
-Neon exposes two endpoints and they are **not** interchangeable. The DB secret
-carries both (`database_url`, `direct_database_url`), and each is used for
-exactly one job:
+The agent's tools return prose, because the model reads those strings and their
+wording is tuned. But prose is useless to a chart, and regexing numbers back out
+of `Predicted price : $253.26/tonne` works right up until someone reformats that
+string, then fails silently with a plausible-looking chart.
 
-| Endpoint | Host | Used by | Why |
-| --- | --- | --- | --- |
-| Pooled | `ep-*-pooler.…` | the app (`lib/prisma.ts`) | PgBouncer in transaction mode suits many short request-scoped connections |
-| Direct | `ep-*.…` | Prisma CLI (`prisma.config.ts`), `scripts/sql-runner.ts` | DDL takes session advisory locks and runs multi-statement scripts, neither of which survives transaction pooling |
+LangChain's `content_and_artifact` format solves it: a tool returns
+`[content, artifact]`, the model still sees only `content`, and the typed
+artifact rides along on the `ToolMessage` (`agents/artifacts.ts`). The AG-UI
+bridge puts each artifact into agent state keyed by tool-call id, and
+`components/chat/tool-renderers.tsx` looks itself up by that id to draw a chart
+instead of a paragraph. Where no artifact exists — an error, a no-data path, a
+tool still running — the prose is shown, which is always truthful because it is
+exactly what the model was told.
 
-Note this is *not* the `url` + `directUrl` datasource pair from older Prisma.
-With driver adapters the schema's datasource block carries no URL at all: the
-adapter supplies the runtime connection and `prisma.config.ts` supplies the
-CLI's. `prisma.config.ts` therefore reads `DIRECT_URL`.
+`agents/agui-agent.ts` is hand-written rather than using `@ag-ui/langgraph`:
+that package drives a *hosted* LangGraph Platform deployment over HTTP, and this
+graph is compiled inside the Next.js process. Subclassing `AbstractAgent` keeps
+the call in-process, with no second copy of the agent.
 
-`DATABASE_URL` / `DIRECT_URL` are optional at runtime (they short-circuit the
-AWS lookup) but **required** for the Prisma CLI, which cannot call AWS. Secrets
-that predate the split still work — a single URL is used for both roles.
+## The agent
 
-## Running
+`llm → (tools → llm)* → END`, compiled with a `PostgresSaver` checkpointer keyed
+by `thread_id` = session id. Two guardrails:
 
-```bash
-npm install
-npm run dev            # http://localhost:3000
-npm run build
-npm run typecheck
-```
+- **Tool-call budget** (`MAX_AGENT_TOOL_CALLS = 8`) — on exhaustion the final LLM
+  hop runs with tools *unbound*, so the loop provably terminates.
+- **`repairToolCalls`** — DeepSeek-V3.2 on Azure emits tool-call arguments with
+  trailing junk (`{"crop_code":"MAIZE"}""`). Strict `JSON.parse` throws, LangChain
+  files it under `invalid_tool_calls`, and the ReAct loop stalls. We scan for the
+  first balanced JSON object and promote the call back to a real one.
 
-Schema and data tooling:
+Conversation memory lives in Postgres, in LangGraph's own `checkpoints*` tables
+(default schema, not `agricultural` — they are the library's infrastructure, not
+domain data). `.setup()` creates them on first use, once per process. In-process
+memory is not an option on serverless: every instance would hold its own, and a
+conversation resumed on a different instance would find none.
 
-```bash
-npm run db:schema        # apply sql/01..10 in order
-npm run db:pull          # re-introspect Neon into prisma/schema.prisma
-npm run seed:embeddings  # backfill agronomic_knowledge.embedding (idempotent)
-npm run hash:password -- '<password>'   # base64 bcrypt hash for ADMIN_PASSWORD_HASH
-```
+The assistant's thread id lives in the URL (`/dashboard/assistant?thread=<uuid>`)
+and is simultaneously the LangGraph `thread_id` and the `chat_sessions` row id.
+Because it is in the URL rather than component state, a conversation survives
+navigation, reload and back/forward; `GET /api/chat/sessions/:id/messages`
+restores the visible transcript after a reload, while the checkpointer restores
+what the agent actually remembers.
+
+One thing that is deliberately NOT preserved: an answer still streaming when you
+navigate away. The run is driven by the browser's connection, so unmounting the
+chat unsubscribes the AG-UI observable and `AgriculturalAgent.run` aborts the
+graph — abandoned runs stop costing Azure calls, but the turn is destroyed, not
+backgrounded. Nothing is persisted (`persistStreamedTurn` is skipped on an abort)
+and there is no checkpoint to resume from either: LangGraph checkpoints at
+superstep boundaries, and streamed tokens come from a node that has not returned.
+
+Until that is fixed properly — durable delta buffer, resumable stream keyed by
+run id, see [Planned](#planned) — `components/chat/run-navigation-guard.tsx`
+holds the user on the page while a run is in flight: `beforeunload` for tab close
+and reload, a capture-phase link interceptor offering "Leave anyway", and a
+sentinel history entry re-pushed on `popstate` for the back button and phone
+back-swipe. It is a stopgap, and the comment at the top of that file says so.
 
 ## API
 
@@ -253,105 +292,21 @@ npm run hash:password -- '<password>'   # base64 bcrypt hash for ADMIN_PASSWORD_
 | GET | `/api/chat/sessions/{session_id}` | 404 if unknown *or* not yours |
 | GET | `/api/chat/sessions/{session_id}/messages` | transcript, oldest first; empty list for a fresh thread |
 | DELETE | `/api/chat/sessions/{session_id}` | idempotent — 200 even if already gone |
-| ALL | `/api/copilotkit/*` | CopilotKit v2 runtime — the chat UI's real transport |
+| ALL | `/api/copilotkit/*` | CopilotKit v2 runtime — the chat UI's transport |
 | ALL | `/api/mcp/mcp` | MCP streamable HTTP (`/api/mcp/sse` for SSE) |
 
-Errors use the Python service's shape: `{"detail": "..."}`.
+Errors are uniform: `{"detail": "..."}` with a real status code, produced by
+`ApiError` + `toErrorResponse` so a handler never assembles one by hand.
 
-The read endpoints beyond the original port (`pairs`, `weather`, `yields`,
-`indicators`, `products`) exist because the dashboard needs them; `pairs` in
-particular was already written for the agent, where it stops the model inventing
-crop/region codes, and the UI uses it to disable picker combinations that would
-draw an empty chart.
+`/api/prices/pairs` deserves a note. It was written for the agent, where it stops
+the model inventing crop/region codes; the UI uses the same truth to disable
+picker combinations that would draw an empty chart. Both consumers need "what
+data actually exists", so neither guesses.
 
-`/api/chat` and `/api/chatstream` are the ported Python surface and still work,
-but the assistant page does not use them — it talks to `/api/copilotkit/*`. Both
-paths run the same compiled graph against the same checkpointer.
-
-## The web app
-
-| Route | What it is |
-| --- | --- |
-| `/dashboard` | coverage tiles and macro indicators as small multiples |
-| `/dashboard/prices` | price history, seasonality heatmap, crop correlation matrix |
-| `/dashboard/crops`, `/dashboard/crops/{code}` | catalog grouped by category; per-crop detail with yields |
-| `/dashboard/regions`, `/dashboard/regions/{code}` | region map; per-region detail with weather |
-| `/dashboard/forecasts` | run an Azure ML prediction, then inspect the feature row behind it |
-| `/dashboard/knowledge` | hybrid search over the knowledge base, with a retriever selector |
-| `/dashboard/assistant` | the chat agent, with a per-user conversation switcher |
-| `/dashboard/admin/users` | the approval queue |
-| `/docs`, `/docs-mcp` | endpoint index and MCP tool catalog |
-
-Three conventions hold across the pages:
-
-- **Server Components by default.** Pages fetch through `lib/api.ts` on the
-  server and ship data-ready HTML; the client bundle carries only pickers and
-  chart interaction layers.
-- **State lives in the URL.** Selected crop/region, search query and chat thread
-  are query params, not component state — so every view is linkable, the back
-  button works, and a reload restores what you were looking at.
-- **Charts are D3 scales, React rendering.** `components/charts/` uses
-  `d3-scale`/`d3-shape` for the maths and JSX for the marks; no charting library
-  owns the DOM.
-
-### Generative UI in the transcript
-
-The agent's tools return prose — the model reads those strings, and that wording
-is production-proven, so it must not change. But prose is useless to a chart.
-LangChain's `content_and_artifact` format solves it: a tool returns
-`[content, artifact]`, the model still sees only `content`, and the typed
-artifact rides along on the `ToolMessage` (`agents/artifacts.ts`). The AG-UI
-bridge puts each artifact into agent state keyed by tool-call id, and
-`components/chat/tool-renderers.tsx` looks itself up by that id to draw a chart
-instead of a paragraph. Where no artifact exists — an error, a no-data path, a
-tool still running — the prose is shown, which is always truthful because it is
-exactly what the model was told.
-
-`agents/agui-agent.ts` is hand-written rather than using `@ag-ui/langgraph`:
-that package drives a *hosted* LangGraph Platform deployment over HTTP, and our
-graph is compiled inside this Next.js process. Subclassing `AbstractAgent` keeps
-the call in-process, with no second copy of the agent.
-
-## The agent
-
-`llm → (tools → llm)* → END`, compiled with a `PostgresSaver` checkpointer keyed by
-`thread_id` = session id. Two guardrails carried over verbatim:
-
-- **Tool-call budget** (`MAX_AGENT_TOOL_CALLS = 8`) — on exhaustion the final LLM
-  hop runs with tools *unbound*, so the loop provably terminates.
-- **`repairToolCalls`** — DeepSeek-V3.2 on Azure emits tool-call arguments with
-  trailing junk (`{"crop_code":"MAIZE"}""`). Strict `JSON.parse` throws, LangChain
-  files it under `invalid_tool_calls`, and the ReAct loop stalls. We scan for the
-  first balanced JSON object and promote the call back to a real one.
-
-Conversation memory lives in Postgres, in LangGraph's own `checkpoints*` tables
-(default schema, not `agricultural` — they are the library's infrastructure, not
-domain data). `.setup()` creates them on first use, once per process. This
-replaced the Python app's in-process `MemorySaver`, which on Vercel meant every
-Lambda instance held its own memory and a conversation resumed on a different
-instance found none.
-
-The assistant's thread id lives in the URL (`/dashboard/assistant?thread=<uuid>`)
-and is simultaneously the LangGraph `thread_id` and the `chat_sessions` row id.
-Because it is in the URL rather than component state, a conversation survives
-navigation, reload and back/forward; `GET /api/chat/sessions/:id/messages`
-restores the visible transcript after a reload, while the checkpointer restores
-what the agent actually remembers.
-
-One thing that is deliberately NOT preserved: an answer still streaming when you
-navigate away. The run is driven by the browser's connection, so unmounting the
-chat unsubscribes the AG-UI observable and `AgriculturalAgent.run` aborts the
-graph — abandoned runs stop costing Azure calls, but the turn is destroyed, not
-backgrounded. Nothing is persisted (`persistStreamedTurn` is skipped on an abort)
-and there is no checkpoint to resume from either: LangGraph checkpoints at
-superstep boundaries, and streamed tokens come from a node that has not returned.
-
-Until that is fixed properly — durable delta buffer, resumable stream keyed by
-run id, see [Planned](#planned) — `components/chat/run-navigation-guard.tsx` holds the user on the page
-while a run is in flight: `beforeunload` for tab close and reload, a capture-phase
-link interceptor offering "Leave anyway", and a sentinel history entry re-pushed
-on `popstate` for the back button and phone back-swipe. It is a stopgap, and the
-comment at the top of that file says so.
+`/api/chat` and `/api/chatstream` answer in one shot and over SSE respectively,
+for clients that want a plain HTTP surface. The assistant page uses neither — it
+talks to `/api/copilotkit/*`. All three run the same compiled graph against the
+same checkpointer.
 
 ## Identity and access
 
@@ -405,6 +360,60 @@ Two configuration notes that will bite otherwise:
   not a database flag, because the first admin cannot come from an approval
   queue that only an admin can service.
 
+## Configuration
+
+Only AWS credentials belong in `.env` — see `.env.example`. Everything else
+resolves at runtime:
+
+- **Secrets Manager** — `prod/agri/database`, `prod/agri/azure-openai`,
+  `prod/agri/azure-ml`
+- **SSM Parameter Store** — `/prod/agri/{embed,chat}-model-name`,
+  `/prod/agri/{embed,chat}-api-version`, `/prod/agri/db-schema`
+
+On AWS compute, drop the keys and use an IAM role.
+
+### Pooled vs direct connections
+
+Neon exposes two endpoints and they are **not** interchangeable. The DB secret
+carries both (`database_url`, `direct_database_url`), and each is used for
+exactly one job:
+
+| Endpoint | Host | Used by | Why |
+| --- | --- | --- | --- |
+| Pooled | `ep-*-pooler.…` | the app (`lib/prisma.ts`) | PgBouncer in transaction mode suits many short request-scoped connections |
+| Direct | `ep-*.…` | Prisma CLI (`prisma.config.ts`), `scripts/sql-runner.ts` | DDL takes session advisory locks and runs multi-statement scripts, neither of which survives transaction pooling |
+
+Note this is *not* the `url` + `directUrl` datasource pair from older Prisma.
+With driver adapters the schema's datasource block carries no URL at all: the
+adapter supplies the runtime connection and `prisma.config.ts` supplies the
+CLI's. `prisma.config.ts` therefore reads `DIRECT_URL`.
+
+`DATABASE_URL` / `DIRECT_URL` are optional at runtime (they short-circuit the
+AWS lookup) but **required** for the Prisma CLI, which cannot call AWS.
+
+## Running
+
+```bash
+npm install
+npm run dev            # http://localhost:3000
+npm run build
+npm run typecheck
+```
+
+Schema and data tooling:
+
+```bash
+npm run db:schema        # apply sql/01..10 in order
+npm run db:pull          # re-introspect Neon into prisma/schema.prisma
+npm run seed:embeddings  # backfill agronomic_knowledge.embedding (idempotent)
+npm run hash:password -- '<password>'   # base64 bcrypt hash for ADMIN_PASSWORD_HASH
+```
+
+The DDL files are ordered and idempotent, so `db:schema` is safe to re-run and
+new files are added rather than edited in place. Apply them before deploying
+code that depends on them — hybrid search, for instance, queries a column that
+`sql/10_hybrid_search.sql` creates.
+
 ## Planned
 
 Three things the current design points at but does not yet do.
@@ -451,13 +460,15 @@ and rendered by the same components. Closed rather than open on purpose: a model
 free to emit arbitrary chart config produces charts that are wrong in ways prose
 would have made obvious.
 
-## Not ported
+## Scope
 
-These stay in the Python repo — they are offline ML tooling, not app logic:
+Deliberately outside this repository:
 
-- `scripts/train_price_model.py` — scikit-learn / MLflow training. The trained
-  model is already deployed to the Azure ML endpoint this service calls.
-- `scripts/generate_data.py`, `seed_demo_data.py`, `load_us_south_prices.py` —
-  one-off data generation against a database that is already populated.
-- `mlflow-price-model/`, `azureml/` — model artifacts and deployment YAML.
-- `Dockerfile` — no containerization by design.
+- **Model training.** The price model is trained offline and deployed to an Azure
+  ML managed endpoint; this application is a client of that endpoint, and keeping
+  the scikit-learn/MLflow pipeline separate stops experiment tooling leaking into
+  request-path code.
+- **Data generation.** The database is populated; there is no seeding path here
+  beyond the embedding backfill, which is idempotent and re-runnable.
+- **Containerisation.** No Dockerfile — the target is a serverless deployment
+  where the platform owns the runtime.
