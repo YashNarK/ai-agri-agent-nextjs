@@ -239,7 +239,7 @@ and there is no checkpoint to resume from either: LangGraph checkpoints at
 superstep boundaries, and streamed tokens come from a node that has not returned.
 
 Until that is fixed properly — durable delta buffer, resumable stream keyed by
-run id — `components/chat/run-navigation-guard.tsx` holds the user on the page
+run id, see [Planned](#planned) — `components/chat/run-navigation-guard.tsx` holds the user on the page
 while a run is in flight: `beforeunload` for tab close and reload, a capture-phase
 link interceptor offering "Leave anyway", and a sentinel history entry re-pushed
 on `popstate` for the back button and phone back-swipe. It is a stopgap, and the
@@ -296,6 +296,52 @@ Two configuration notes that will bite otherwise:
 - The admin is matched from configuration (`ADMIN_GITHUB_LOGIN`, `ADMIN_EMAIL`),
   not a database flag, because the first admin cannot come from an approval
   queue that only an admin can service.
+
+## Planned
+
+Three things the current design points at but does not yet do.
+
+### 1. Human-interruptible chat sessions
+
+Today a turn runs to completion or is aborted. The agent should be able to stop
+mid-graph and ask — before it spends money on a forecast, when a question is
+ambiguous enough that guessing the crop or region is worse than asking, or when a
+tool call's arguments deserve a look before they are executed.
+
+LangGraph's `interrupt()` is the mechanism, and the groundwork is already here:
+the graph is compiled with a `PostgresSaver`, so an interrupted run is a durable
+checkpoint rather than a held-open request. The work is in the surface — the
+interrupt has to travel as an AG-UI event, the transcript needs a state for
+"waiting on you", and the resume has to carry the user's answer back into the
+same thread. The same channel gives the user a real stop button: interrupt, not
+just disconnect.
+
+### 2. Runs that survive walking away
+
+Right now leaving mid-answer destroys the turn, and `run-navigation-guard.tsx`
+exists only to warn about it (see [The agent](#the-agent)). That is a stopgap for
+a design flaw: the browser's HTTP connection owns the run.
+
+The fix is to invert that. Deltas go to a durable buffer keyed by run id as they
+are produced, and the browser gets a stream it can re-attach to — so closing the
+tab, navigating to another site, or picking the conversation up on a phone all
+land on the same answer, finished or still arriving. It also makes the turn
+persist on its own terms rather than only on the happy path, which is the second
+bug in the current teardown.
+
+### 3. Charts wherever the answer wants one
+
+Each of the six agent tools already carries a typed artifact and renders as a
+chart or table in the transcript. What is missing is everything the model
+*synthesises*: an answer that compares two regions, or reasons across a forecast
+and the weather behind it, still lands as prose because no single tool produced
+it.
+
+The next step is to let the model choose the form — a small, closed set of chart
+specs it can emit as structured output, validated against the same zod schemas
+and rendered by the same components. Closed rather than open on purpose: a model
+free to emit arbitrary chart config produces charts that are wrong in ways prose
+would have made obvious.
 
 ## Not ported
 
