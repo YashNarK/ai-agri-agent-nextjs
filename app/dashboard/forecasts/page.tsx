@@ -53,6 +53,13 @@ import { PredictionForm } from "./prediction-form";
 export const metadata = { title: "Forecasts" };
 export const dynamic = "force-dynamic";
 
+// runForecast in ./actions.ts scores against the model Lambda, whose
+// cold start is ~9.4s. Server Actions take their duration budget from
+// the route segment they are invoked under, so without this the first
+// forecast of an idle period can exceed Vercel's 10s Hobby default and
+// fail from the UI while the same call succeeds via /api/predictions.
+export const maxDuration = 60;
+
 /**
  * Rows per page. Small enough that the table never needs its own scroll
  * region, which keeps the pager visible without the page jumping.

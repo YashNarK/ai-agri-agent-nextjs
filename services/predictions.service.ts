@@ -1,14 +1,24 @@
 // ============================================================
 // services/predictions.service.ts
 //
-// Crop-price prediction via the deployed MLflow model on an
-// Azure ML managed online endpoint.
+// Crop-price prediction via the deployed MLflow model, running as a
+// container-image Lambda (agri-price-model) invoked with SigV4.
+//
+// Replaced an Azure ML managed online endpoint, which held a
+// Standard_DS2_v2 VM 24×7 — ~₹5,400/month — to serve a 1.1 MB
+// scikit-learn model. Same artifact, verified to reproduce that
+// endpoint's predictions to all 16 significant digits.
 //
 // Port of services/prediction_service.py
 // ============================================================
 
+import {
+  InvokeCommand,
+  type InvokeCommandOutput,
+} from "@aws-sdk/client-lambda";
+
 import type { AppConfig } from "@/lib/aws/app-config";
-import { settings } from "@/lib/config/settings";
+import { lambdaClient } from "@/lib/aws/lambda-client";
 import { ApiError, badGateway, unprocessable } from "@/lib/errors";
 import type {
   LoggedPrediction,
@@ -267,7 +277,18 @@ export class PredictionsService {
     };
   }
 
-  /** POSTs the feature row to the Azure ML endpoint and parses the result. */
+  /**
+   * Invokes the model Lambda with the feature row and parses the result.
+   *
+   * Direct SigV4 invoke, not HTTP: the function has no public endpoint
+   * and no API key. AWS authorises the caller from the credentials in
+   * lib/aws/lambda-client.ts before the handler runs, so there is no
+   * bearer token to leak, rotate, or accidentally publish.
+   *
+   * The payload IS the event — the handler returns a bare
+   * {"predictions": [...]} for direct invokes rather than an HTTP
+   * envelope.
+   */
   async scoreFeatures(
     features: FeatureRow,
     config: AppConfig,
@@ -279,34 +300,39 @@ export class PredictionsService {
       },
     };
 
-    let response: Response;
+    let response: InvokeCommandOutput;
     try {
-      response = await fetch(config.azureML.endpointUrl, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${config.azureML.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(settings.HTTP_CLIENT_TIMEOUT_MS),
-      });
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      throw badGateway(`Azure ML endpoint error: ${detail}`);
-    }
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      throw badGateway(
-        `Azure ML endpoint error: ${response.status} ${response.statusText} ${body}`.trim(),
+      response = await lambdaClient().send(
+        new InvokeCommand({
+          FunctionName: config.model.functionName,
+          // RequestResponse = synchronous. The default would be Event,
+          // which fires and forgets and returns no prediction at all.
+          InvocationType: "RequestResponse",
+          Payload: JSON.stringify(payload),
+        }),
       );
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw badGateway(`Price model error: ${detail}`);
+    }
+
+    const raw = response.Payload
+      ? Buffer.from(response.Payload).toString("utf-8")
+      : "";
+
+    // A handler exception still returns HTTP 200 from the Lambda API —
+    // the failure is signalled by FunctionError, and Payload holds the
+    // Python traceback. Without this check a crash would be parsed as
+    // if it were a prediction.
+    if (response.FunctionError) {
+      throw badGateway(`Price model error: ${response.FunctionError} ${raw}`.trim());
     }
 
     try {
-      return parsePrediction(await response.json());
+      return parsePrediction(JSON.parse(raw));
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      throw badGateway(`Azure ML endpoint error: ${detail}`);
+      throw badGateway(`Price model error: ${detail}`);
     }
   }
 
@@ -341,7 +367,7 @@ export class PredictionsService {
       predictedPrice,
       confidenceLow,
       confidenceHigh,
-      modelVersion: config.azureML.modelName,
+      modelVersion: config.model.modelName,
       featuresUsed: features,
     });
 

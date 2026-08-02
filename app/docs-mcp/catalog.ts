@@ -176,10 +176,10 @@ export const TOOLS: ToolDoc[] = [
     signature:
       "forecast_crop_price(crop_code: string, region_code: string, target_date: string) -> object",
     summary:
-      "ML price forecast (USD/tonne) with a confidence interval, via Azure ML.",
+      "ML price forecast (USD/tonne) with a confidence interval.",
     description:
       "Builds model features from recent price history + macro indicators and " +
-      "calls the Azure ML managed online endpoint (Gradient Boosting model). " +
+      "calls the ML price model on AWS Lambda (Gradient Boosting model). " +
       "Requires existing price history for the pair (see list_available_data). " +
       "Returns a predicted price with confidence bounds, or a clear error — " +
       "never a fabricated value.",

@@ -345,9 +345,9 @@ export function buildAgentTools(container: Container, config: AppConfig) {
               ? error.message
               : String(error);
         return [
-          detail.startsWith("Azure ML endpoint error")
+          detail.startsWith("Price model error")
             ? detail
-            : `Azure ML endpoint error: ${detail}`,
+            : `Price model error: ${detail}`,
           null,
         ];
       }
@@ -381,7 +381,7 @@ export function buildAgentTools(container: Container, config: AppConfig) {
       name: "predict_crop_price",
       responseFormat: "content_and_artifact",
       description:
-        "Predict the future commodity price for a crop in a region via the Azure ML model. " +
+        "Predict the future commodity price for a crop in a region via the ML price model. " +
         "Use this when the user asks about future prices, forecasts, or predictions. " +
         "target_date format: YYYY-MM-DD. " +
         "Requires existing price history for the crop/region pair — call " +

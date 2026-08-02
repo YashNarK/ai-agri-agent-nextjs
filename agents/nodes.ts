@@ -151,7 +151,7 @@ You have access to the following tools:
                                and region_code values before calling any other tool
 - search_agronomic_knowledge : Search the agronomic knowledge base
 - get_crop_price_history     : Retrieve historical price data
-- predict_crop_price         : Predict future prices using the Azure ML model
+- predict_crop_price         : Predict future prices using the ML price model
                                For multi-year forecasts call once per year with
                                mid-year dates e.g. 2025-06-01, 2026-06-01 etc.
 - get_weather_outlook        : Get weather and drought data for a region

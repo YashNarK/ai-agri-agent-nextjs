@@ -155,7 +155,7 @@ const handler = createMcpHandler(
     // --------------------------------------------------------
     server.tool(
       "forecast_crop_price",
-      "Forecast a future commodity price using the Azure ML model. " +
+      "Forecast a future commodity price using the ML price model. " +
         "target_date format: YYYY-MM-DD. Requires existing price history for " +
         "the crop/region pair (see list_available_data). Returns predicted " +
         "price with a confidence interval, or a clear error if the pair has " +

@@ -32,10 +32,19 @@ import { parseDateOnly } from "@/lib/serialize";
 
 export const runtime = "nodejs";
 
+// The model Lambda cold-starts in ~9.4s (unpacking a 536 MB container
+// image). Add the Neon round-trips POST makes either side of it — three
+// lag prices, four macro indicators, then the insert — and a cold
+// forecast can land near 11s. Vercel's default function duration is 10s
+// on Hobby, so leaving this unset means the first forecast after an idle
+// period intermittently 504s while a warm one returns in ~200ms.
+// 60 is well clear and still far below the 300 used by the chat routes.
+export const maxDuration = 60;
+
 /**
  * GET /api/predictions — browse forecasts already logged.
  *
- * Read-only and free: POST is what calls the Azure ML endpoint and
+ * Read-only and free: POST is what calls the price model and
  * writes the row; this just reads what that produced, including the
  * feature vector each forecast was scored on.
  *

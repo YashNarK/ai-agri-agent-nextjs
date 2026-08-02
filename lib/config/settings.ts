@@ -47,7 +47,18 @@ export const settings = {
   AWS_REGION: str("APP_AWS_REGION", "ap-south-1"),
   DB_SECRET_NAME: str("DB_SECRET_NAME", "prod/agri/database"),
   AZURE_OPENAI_SECRET_NAME: str("AZURE_OPENAI_SECRET_NAME", "prod/agri/azure-openai"),
-  AZURE_ML_SECRET_NAME: str("AZURE_ML_SECRET_NAME", "prod/agri/azure-ml"),
+
+  // price model — a Lambda in this same account, invoked with SigV4.
+  //
+  // Neither value is a secret, so neither is in Secrets Manager: a
+  // function name is not sensitive, and there is no API key to hold.
+  // Authorisation is IAM on the caller's credentials, which means the
+  // model has no publicly reachable endpoint at all. This replaced the
+  // Azure ML managed online endpoint, which cost ~₹5,400/month to idle.
+  MODEL_FUNCTION_NAME: str("MODEL_FUNCTION_NAME", "agri-price-model"),
+
+  // written to price_predictions.model_version on every forecast
+  MODEL_VERSION_LABEL: str("MODEL_VERSION_LABEL", "crop-price-gbr"),
 
   // ssm parameter paths
   SSM_EMBED_MODEL_NAME: str("SSM_EMBED_MODEL_NAME", "/prod/agri/embed-model-name"),

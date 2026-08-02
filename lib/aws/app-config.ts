@@ -54,11 +54,10 @@ interface OpenAISecret {
   chat_endpoint: string;
 }
 
-interface AzureMLSecret {
-  endpoint_url: string;
-  api_key: string;
-  model_name: string;
-}
+// NOTE: there is deliberately no ModelSecret. The price model is a
+// Lambda in this account, invoked with SigV4 — there is no endpoint URL
+// and no API key to keep. Its function name and version label are
+// non-secret config in lib/config/settings.ts.
 
 // ============================================================
 // Resolved runtime configuration
@@ -98,16 +97,17 @@ export interface AzureOpenAIConfig {
   chatApiVersion: string;
 }
 
-export interface AzureMLConfig {
-  endpointUrl: string;
-  apiKey: string;
+export interface ModelConfig {
+  /** Lambda function name or ARN, invoked with SigV4. */
+  functionName: string;
+  /** Recorded as price_predictions.model_version for audit. */
   modelName: string;
 }
 
 export interface AppConfig {
   database: DatabaseConfig;
   azureOpenAI: AzureOpenAIConfig;
-  azureML: AzureMLConfig;
+  model: ModelConfig;
   dbSchema: string;
 }
 
@@ -295,12 +295,10 @@ async function buildAppConfig(): Promise<AppConfig> {
     throw new Error("Database URL is missing — check AWS Secrets Manager.");
   }
 
-  const [openaiSecret, azureMlSecret] = await Promise.all([
-    getSecret<OpenAISecret>(settings.AZURE_OPENAI_SECRET_NAME),
-    getSecret<AzureMLSecret>(settings.AZURE_ML_SECRET_NAME),
-  ]);
+  const openaiSecret = await getSecret<OpenAISecret>(
+    settings.AZURE_OPENAI_SECRET_NAME,
+  );
   logSecretStatus("azure_openai", openaiSecret as unknown as Record<string, unknown>);
-  logSecretStatus("azure_ml", azureMlSecret as unknown as Record<string, unknown>);
 
   // -- fetch non-secret config from SSM Parameter Store --
   const [
@@ -329,10 +327,9 @@ async function buildAppConfig(): Promise<AppConfig> {
       chatModelName,
       chatApiVersion,
     },
-    azureML: {
-      endpointUrl: azureMlSecret.endpoint_url,
-      apiKey: azureMlSecret.api_key,
-      modelName: azureMlSecret.model_name,
+    model: {
+      functionName: settings.MODEL_FUNCTION_NAME,
+      modelName: settings.MODEL_VERSION_LABEL,
     },
     dbSchema,
   };
