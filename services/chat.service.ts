@@ -17,6 +17,7 @@ import { randomUUID } from "node:crypto";
 
 import { getAgentGraph } from "@/agents/graph";
 import { isAiMessage, RECURSION_LIMIT } from "@/agents/nodes";
+import { asRunTrace, type RunTrace } from "@/agents/trace";
 import { ApiError, notFound } from "@/lib/errors";
 import type {
   ConversationSummary,
@@ -263,18 +264,42 @@ export class ChatService {
     return { session_id: id, message: responseText, tool_calls: toolCalls };
   }
 
-  /** Persists one streamed turn once the SSE generator has finished. */
+  /**
+   * Persists one streamed turn once the SSE generator has finished.
+   *
+   * `trace` carries the run's steps with their arguments and results.
+   * Before it existed this wrote `[{name}]` and nothing else, so a
+   * reloaded conversation showed the answer with no record of how it was
+   * reached — the tool cards rendered during the live run were the only
+   * evidence, and they died with the connection. Tool names are still
+   * written to `tool_calls` for the non-streaming route's benefit; the
+   * arguments now ride along with them.
+   */
   async persistStreamedTurn(
     sessionId: string,
     userMessage: string,
     finalText: string,
     toolNames: string[],
+    trace?: RunTrace | null,
   ): Promise<void> {
+    // prefer the trace's steps, which carry the args the model chose
+    const fromTrace = trace?.steps
+      .filter((step) => step.kind === "tool")
+      .map((step) => ({ name: step.name, args: step.args }));
+
+    const toolCalls =
+      fromTrace && fromTrace.length > 0
+        ? fromTrace
+        : toolNames.length > 0
+          ? toolNames.map((name) => ({ name }))
+          : null;
+
     await this.chatRepo.persistTurn({
       sessionId,
       userMessage,
       aiMessage: finalText,
-      toolCalls: toolNames.length > 0 ? toolNames.map((name) => ({ name })) : null,
+      toolCalls,
+      trace: trace ?? null,
     });
     await this.chatRepo.setSessionNameIfEmpty(sessionId, titleFrom(userMessage));
   }
@@ -287,9 +312,10 @@ export class ChatService {
    * that has never been used is the normal first-visit case, not an error,
    * and returning an empty transcript lets the client treat both the same.
    *
-   * Only human and AI turns are replayed. Tool calls are persisted too,
-   * but their inline renderings belong to a live run — replaying them from
-   * a transcript would show chart cards with no run behind them.
+   * Only human and AI turns are replayed as MESSAGES. Each AI turn also
+   * carries its run trace, which the accordion renders above it — that
+   * is the record of how the answer was reached, and it is exactly what
+   * a reloaded conversation used to lose.
    */
   async getTranscript(
     sessionId: string,
@@ -312,11 +338,17 @@ export class ChatService {
 
     const messages: TranscriptMessage[] = rows
       .filter((row) => row.role === "human" || row.role === "ai")
-      .map((row) => ({
-        id: String(row.id),
-        role: row.role === "human" ? ("user" as const) : ("assistant" as const),
-        content: row.content,
-      }));
+      .map((row) => {
+        const trace = asRunTrace(row.tool_results);
+        return {
+          id: String(row.id),
+          role: row.role === "human" ? ("user" as const) : ("assistant" as const),
+          content: row.content,
+          // omitted rather than null so turns written before traces
+          // existed serialise identically to how they always did
+          ...(trace ? { trace } : {}),
+        };
+      });
 
     return { session_id: sessionId, messages };
   }

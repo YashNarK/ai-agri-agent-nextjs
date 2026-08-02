@@ -382,6 +382,16 @@ export interface TranscriptMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /**
+   * How this answer was reached: the run's steps, their inputs and their
+   * outputs. Assistant turns only, and absent on turns persisted before
+   * traces were captured — the accordion simply does not render for
+   * those rather than showing an empty one.
+   *
+   * Typed as unknown here to keep lib/schemas.ts free of agent imports;
+   * agents/trace.ts owns the shape and narrows it with asRunTrace.
+   */
+  trace?: unknown;
 }
 
 export interface TranscriptResponse {

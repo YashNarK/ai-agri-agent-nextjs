@@ -73,6 +73,11 @@ import { Observable } from "rxjs";
 import { asToolArtifact, type ToolArtifact } from "@/agents/artifacts";
 import { getAgentGraph } from "@/agents/graph";
 import { MAX_AGENT_TOOL_CALLS, RECURSION_LIMIT } from "@/agents/nodes";
+import {
+  truncateStepOutput,
+  type RunStep,
+  type RunTrace,
+} from "@/agents/trace";
 import { chatService } from "@/lib/container";
 import { BUDGET_FALLBACK, chunkText } from "@/services/chat.service";
 
@@ -89,6 +94,13 @@ export interface AgentUiState {
   toolCallsUsed: number;
   toolCallBudget: number;
   budgetExhausted: boolean;
+  /**
+   * The run's steps so far, streamed so the accordion can fill in live
+   * rather than appearing only once the turn is persisted. The same
+   * shape is written to the database, so one component renders both the
+   * running turn and a turn reloaded a week later.
+   */
+  trace: RunStep[];
   [key: string]: unknown;
 }
 
@@ -98,6 +110,7 @@ function emptyState(): AgentUiState {
     toolCallsUsed: 0,
     toolCallBudget: MAX_AGENT_TOOL_CALLS,
     budgetExhausted: false,
+    trace: [],
   };
 }
 
@@ -195,6 +208,52 @@ function describeError(error: unknown): string {
     }
   }
   return String(error);
+}
+
+/**
+ * Unwraps the tool arguments LangChain reports on `on_tool_start`.
+ *
+ * It hands over `data.input` as `{ input: <what the model sent> }`, and
+ * for a structured tool that inner value is a JSON *string*. Passed
+ * along raw, every consumer sees one opaque key:
+ *
+ *   {"input":"{\"crop_code\":\"MAIZE\",\"region_code\":\"US-CORN\"}"}
+ *
+ * which is why the tool cards' summary lines have always rendered empty
+ * — their schemas look for `crop_code`, and there is no such key at the
+ * top level. The trace inherited the same problem, so an expanded step
+ * showed a wall of escaped JSON instead of the arguments the model
+ * chose. Unwrapped once here, both get the real object.
+ *
+ * Anything unexpected is returned untouched: a wrong-but-complete
+ * record beats losing the arguments entirely.
+ */
+function normaliseToolArgs(input: unknown): Record<string, unknown> {
+  let value = input;
+
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    Object.keys(value).length === 1 &&
+    "input" in value
+  ) {
+    value = (value as { input: unknown }).input;
+  }
+
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text === "") return {};
+    try {
+      value = JSON.parse(text);
+    } catch {
+      return { input: value };
+    }
+  }
+
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return value === undefined ? {} : { input: value };
 }
 
 export interface AgriculturalAgentOptions {
@@ -332,6 +391,24 @@ export class AgriculturalAgent extends AbstractAgent {
     /** LangChain run_id → the tool-call id we advertised to the client. */
     const openToolCalls = new Map<string, string>();
 
+    const runStartedAt = Date.now();
+    /**
+     * Tool arguments, kept from on_tool_start so on_tool_end can file a
+     * complete step. LangChain reports the input and the output in two
+     * different events, and only their run_id ties them together.
+     */
+    const pendingSteps = new Map<
+      string,
+      { index: number; startedAt: number }
+    >();
+    /** Index in state.trace of the prose step currently being written. */
+    let openTextStep: number | null = null;
+
+    const recordStep = (step: RunStep): number => {
+      state.trace.push(step);
+      return state.trace.length - 1;
+    };
+
     const closeText = () => {
       if (openTextMessageId === null) return;
       emit({
@@ -339,6 +416,7 @@ export class AgriculturalAgent extends AbstractAgent {
         messageId: openTextMessageId,
       });
       openTextMessageId = null;
+      openTextStep = null;
     };
 
     const pushState = () => {
@@ -369,6 +447,16 @@ export class AgriculturalAgent extends AbstractAgent {
             if (openTextMessageId === null) {
               openTextMessageId = `${runId}-msg-${event.run_id}`;
               segments.push("");
+              // prose is a step too: "I'll check what data exists first"
+              // is the reasoning that motivates the tool call after it,
+              // and a trace of bare tool calls reads as unmotivated
+              openTextStep = recordStep({
+                index: state.trace.length,
+                kind: "text",
+                name: "reasoning",
+                output: "",
+                ok: true,
+              });
               emit({
                 type: EventType.TEXT_MESSAGE_START,
                 messageId: openTextMessageId,
@@ -376,6 +464,10 @@ export class AgriculturalAgent extends AbstractAgent {
               });
             }
             segments[segments.length - 1] += text;
+            if (openTextStep !== null) {
+              const step = state.trace[openTextStep];
+              step.output = (step.output ?? "") + text;
+            }
             emit({
               type: EventType.TEXT_MESSAGE_CONTENT,
               messageId: openTextMessageId,
@@ -393,6 +485,21 @@ export class AgriculturalAgent extends AbstractAgent {
             toolNames.push(event.name);
             state.toolCallsUsed += 1;
 
+            const toolArgs = normaliseToolArgs(event.data?.input);
+            pendingSteps.set(event.run_id, {
+              index: recordStep({
+                index: state.trace.length,
+                kind: "tool",
+                name: event.name,
+                // the arguments the MODEL chose — the part that explains
+                // why this call happened, and the part the old
+                // `[{name}]` persistence threw away entirely
+                args: toolArgs,
+                ok: true,
+              }),
+              startedAt: Date.now(),
+            });
+
             emit({
               type: EventType.TOOL_CALL_START,
               toolCallId,
@@ -401,7 +508,9 @@ export class AgriculturalAgent extends AbstractAgent {
             emit({
               type: EventType.TOOL_CALL_ARGS,
               toolCallId,
-              delta: JSON.stringify(event.data?.input ?? {}),
+              // the unwrapped object, so the tool-card renderers' zod
+              // schemas actually match and their summary lines fill in
+              delta: JSON.stringify(toolArgs),
             });
             emit({ type: EventType.TOOL_CALL_END, toolCallId });
             break;
@@ -415,12 +524,13 @@ export class AgriculturalAgent extends AbstractAgent {
             const output = event.data?.output as
               | { content?: unknown; artifact?: unknown }
               | undefined;
+            const resultText = chunkText(output?.content);
 
             emit({
               type: EventType.TOOL_CALL_RESULT,
               messageId: `${toolCallId}-result`,
               toolCallId,
-              content: chunkText(output?.content),
+              content: resultText,
               role: "tool",
             });
 
@@ -431,7 +541,43 @@ export class AgriculturalAgent extends AbstractAgent {
             if (artifact) {
               state.artifacts[toolCallId] = artifact;
             }
+
+            const pending = pendingSteps.get(event.run_id);
+            if (pending) {
+              pendingSteps.delete(event.run_id);
+              const step = state.trace[pending.index];
+              const { output: kept, truncated } = truncateStepOutput(resultText);
+              step.output = kept;
+              if (truncated) step.output_truncated = true;
+              if (artifact) step.artifact_kind = artifact.kind;
+              step.duration_ms = Date.now() - pending.startedAt;
+              // The tools report failure in their prose rather than by
+              // throwing — a refused forecast is a normal return whose
+              // text starts with NO FORECAST AVAILABLE. Reading that
+              // back is what lets the accordion mark the step failed
+              // instead of showing a green tick over an error.
+              step.ok =
+                !/^(NO FORECAST AVAILABLE|Price model error|Invalid |Crop '|Region ')/.test(
+                  resultText,
+                );
+            }
             pushState();
+            break;
+          }
+
+          case "on_tool_error": {
+            // Rare — the tools catch their own failures and report them
+            // in prose. This is the path where one throws anyway, and
+            // without it the step would stay marked ok with no output.
+            const pending = pendingSteps.get(event.run_id);
+            if (pending) {
+              pendingSteps.delete(event.run_id);
+              const step = state.trace[pending.index];
+              step.ok = false;
+              step.output = describeError(event.data?.error);
+              step.duration_ms = Date.now() - pending.startedAt;
+              pushState();
+            }
             break;
           }
 
@@ -508,11 +654,41 @@ export class AgriculturalAgent extends AbstractAgent {
     }
 
     if (answer !== "" && !signal.aborted) {
+      // The last prose step IS the answer, not more reasoning — labelling
+      // it lets the accordion stop short of repeating the reply that is
+      // already rendered directly beneath it.
+      for (let i = state.trace.length - 1; i >= 0; i -= 1) {
+        if (state.trace[i].kind === "text") {
+          state.trace[i].name = "answer";
+          break;
+        }
+      }
+
+      // truncate prose steps on the way out, for the same reason tool
+      // output is truncated: this lands in a column read on every
+      // transcript load
+      const steps: RunStep[] = state.trace.map((step) => {
+        if (step.kind !== "text" || !step.output) return step;
+        const { output, truncated } = truncateStepOutput(step.output);
+        return truncated ? { ...step, output, output_truncated: true } : step;
+      });
+
+      const trace: RunTrace = {
+        v: 1,
+        run_id: runId,
+        steps,
+        tool_calls_used: state.toolCallsUsed,
+        tool_call_budget: MAX_AGENT_TOOL_CALLS,
+        budget_exhausted: state.budgetExhausted,
+        duration_ms: Date.now() - runStartedAt,
+      };
+
       await chatService.persistStreamedTurn(
         threadId,
         userMessage,
         answer,
         toolNames,
+        trace,
       );
     }
 

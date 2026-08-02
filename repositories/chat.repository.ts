@@ -3,6 +3,7 @@
 // Chat session + message persistence
 // ============================================================
 
+import type { RunTrace } from "@/agents/trace";
 import type { Prisma } from "@/app/generated/prisma/client";
 import { getPrisma } from "@/lib/prisma";
 import type { ToolCallRecord } from "@/lib/schemas";
@@ -13,6 +14,14 @@ export interface PersistTurnInput {
   aiMessage: string;
   toolCalls: ToolCallRecord[] | null;
   langgraphState?: Record<string, unknown> | null;
+  /**
+   * The run's step-by-step trace, written to the `tool_results` column.
+   *
+   * That column has existed since sql/06_chat.sql and was never
+   * written — which is why a reloaded conversation could show the answer
+   * but nothing about how it was reached.
+   */
+  trace?: RunTrace | null;
 }
 
 export class ChatRepository {
@@ -143,6 +152,7 @@ export class ChatRepository {
     aiMessage,
     toolCalls,
     langgraphState,
+    trace,
   }: PersistTurnInput) {
     const prisma = await getPrisma();
 
@@ -154,6 +164,7 @@ export class ChatRepository {
           role: "ai",
           content: aiMessage,
           tool_calls: (toolCalls ?? undefined) as Prisma.InputJsonValue | undefined,
+          tool_results: (trace ?? undefined) as Prisma.InputJsonValue | undefined,
           langgraph_state: (langgraphState ??
             undefined) as Prisma.InputJsonValue | undefined,
         },

@@ -24,18 +24,54 @@
 
 import {
   CopilotChat,
+  CopilotChatAssistantMessage,
   useAgent,
   UseAgentUpdate,
 } from "@copilotkit/react-core/v2";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 
 import type { AgentUiState } from "@/agents/agui-agent";
+import { asRunTrace, type RunTrace } from "@/agents/trace";
 import { seriesColor } from "@/components/charts/theme";
+import { ReasoningAccordion } from "@/components/chat/reasoning-accordion";
 import { RunNavigationGuard } from "@/components/chat/run-navigation-guard";
 import type { TranscriptResponse } from "@/lib/schemas";
 
 const AGENT_ID = "agricultural";
+
+/**
+ * The current run's reasoning trace, live.
+ *
+ * Reads the same `trace` the bridge streams in STATE_SNAPSHOT and the
+ * same shape it persists, so the accordion a user expands mid-run is
+ * the one they will still find after a reload.
+ *
+ * Rendered above the composer rather than threaded into CopilotChat's
+ * message list: the message slots receive a rendered message, not the
+ * run behind it, so there is no per-message hook to hang this on
+ * without forking the component. Replayed turns get their accordion
+ * from the transcript instead — see useRestoredTranscript.
+ */
+function LiveReasoning() {
+  const { agent } = useAgent({
+    agentId: AGENT_ID,
+    updates: [UseAgentUpdate.OnStateChanged, UseAgentUpdate.OnRunStatusChanged],
+  });
+  const state = agent.state as Partial<AgentUiState> | undefined;
+  const steps = state?.trace ?? [];
+
+  if (steps.length === 0) return null;
+
+  return (
+    <div className="border-b px-4 py-1">
+      <ReasoningAccordion
+        trace={{ steps }}
+        running={agent.isRunning}
+      />
+    </div>
+  );
+}
 
 /**
  * Says out loud that leaving now would cancel the answer.
@@ -129,6 +165,73 @@ function WorkBudget() {
  * A run in flight is also a reason to stay out of the way: setMessages
  * mid-stream would drop the partial answer the run is appending to.
  */
+/**
+ * Traces for REPLAYED turns, keyed by the message id the transcript
+ * gave them.
+ *
+ * A context rather than a prop because the consumer is a slot component
+ * CopilotChat instantiates itself — there is no call site to thread a
+ * prop through. Empty for a live run, whose accordion is fed from agent
+ * state instead.
+ */
+const ReplayedTraces = createContext<Record<string, RunTrace>>({});
+
+/**
+ * Which conversation the shared agent's messages currently belong to.
+ *
+ * MODULE SCOPE, DELIBERATELY. There is one agent instance for every
+ * thread (useAgent keys by agentId alone) and it is owned by the
+ * provider in the dashboard LAYOUT, so it outlives this component by
+ * design — that is what keeps a streaming answer alive when you glance
+ * at another page. A ref or state here is therefore the wrong lifetime:
+ * it resets on remount while the agent keeps yesterday's messages, and
+ * the mismatch is invisible until you open an old conversation and see
+ * the previous one's bubbles.
+ *
+ * Tying the marker to the agent's lifetime instead means both are reset
+ * by the same thing — a full reload — and never disagree.
+ */
+let agentThread: string | null = null;
+
+/** Stable empty value, so an unrestored thread does not re-render on every pass. */
+const NO_TRACES: { thread: string; map: Record<string, RunTrace> } = {
+  thread: "",
+  map: {},
+};
+
+/**
+ * The stock assistant message with its run's accordion above it.
+ *
+ * Wrapping rather than reimplementing: everything CopilotKit renders —
+ * markdown, toolbar, tool-call views — is untouched, and this adds one
+ * element before it. Live turns get their accordion from LiveReasoning
+ * instead, so this stays silent unless the message came from the
+ * database.
+ */
+// Object.assign, not a bare function: the slot is typed as
+// `typeof CopilotChatAssistantMessage`, which carries the component's
+// static sub-slots (MarkdownRenderer, Toolbar, CopyButton, …). A
+// replacement without them is not assignable, and CopilotChat reaches
+// for them when rendering. Copying them over keeps the wrapper a
+// drop-in.
+const AssistantMessageWithTrace = Object.assign(
+  function AssistantMessageWithTrace(
+    props: React.ComponentProps<typeof CopilotChatAssistantMessage>,
+  ) {
+    const traces = useContext(ReplayedTraces);
+    const id = props.message?.id;
+    const trace = id ? traces[id] : undefined;
+
+    return (
+      <>
+        {trace && <ReasoningAccordion trace={trace} />}
+        <CopilotChatAssistantMessage {...props} />
+      </>
+    );
+  },
+  CopilotChatAssistantMessage,
+);
+
 function useRestoredTranscript(threadId: string) {
   // `useAgent` in this version keys agents by agentId alone — there is no
   // threadId parameter, so this is the same agent instance `<CopilotChat
@@ -137,10 +240,38 @@ function useRestoredTranscript(threadId: string) {
   const { agent } = useAgent({ agentId: AGENT_ID });
   // one restore attempt per thread, even under StrictMode's double effect
   const restoredFor = useRef<string | null>(null);
+  // Stamped with the thread they were fetched for, rather than cleared
+  // on switch. Clearing would mean a setState in the effect body, which
+  // triggers a cascading render; tagging lets the read below simply
+  // ignore another conversation's traces until the new ones arrive.
+  const [traces, setTraces] = useState<{
+    thread: string;
+    map: Record<string, RunTrace>;
+  }>(NO_TRACES);
 
   useEffect(() => {
     if (restoredFor.current === threadId) return;
+
+    // Whether the messages the agent is holding belong to a DIFFERENT
+    // conversation than the one now in the URL. See agentThread above
+    // for why this cannot be answered from component state.
+    const stale = agentThread !== null && agentThread !== threadId;
+    agentThread = threadId;
     restoredFor.current = threadId;
+
+    // Clear FIRST, synchronously. The transcript fetch below is async,
+    // and until it resolves the pane would otherwise keep rendering the
+    // previous conversation under the new conversation's URL — which is
+    // the visible half of this bug.
+    // These are external-system calls on the agent, not React state, so
+    // they are exactly what an effect body is for.
+    if (stale) {
+      agent.setMessages([]);
+      // The run state is per-agent too, so the previous conversation's
+      // reasoning accordion, artifacts and tool-budget pips would
+      // otherwise sit above the new conversation as well.
+      agent.setState({});
+    }
 
     let cancelled = false;
 
@@ -154,15 +285,44 @@ function useRestoredTranscript(threadId: string) {
         const transcript = (await response.json()) as TranscriptResponse;
         if (cancelled) return;
         if (transcript.messages.length === 0) return;
-        // re-checked here, not just above: the fetch is async, and a run
-        // may have started while it was in flight
-        if (agent.messages.length > 0 || agent.isRunning) return;
+        // A run that started while the fetch was in flight owns the pane
+        // — replacing its messages would drop the answer mid-write.
+        if (agent.isRunning) return;
+        // Only defer to the in-memory transcript when it belongs to THIS
+        // conversation, where it is genuinely the fresher copy. When it
+        // belongs to another one it is not fresher, it is wrong, and the
+        // old guard's `messages.length > 0` could not tell the two apart
+        // — so switching conversations silently kept showing the one you
+        // had just left.
+        if (!stale && agent.messages.length > 0) return;
 
-        agent.setMessages(transcript.messages);
-      } catch {
-        // a failed restore is a cosmetic loss — the conversation itself
-        // is intact in the checkpointer, so the agent still has context
-        // for the next turn even with an empty-looking pane
+        // Traces are lifted out BEFORE setMessages: the agent's Message
+        // type has no room for them, so anything not extracted here is
+        // dropped on the way in and the replayed turns lose their
+        // accordions again.
+        const restored: Record<string, RunTrace> = {};
+        for (const message of transcript.messages) {
+          const trace = asRunTrace(message.trace);
+          if (trace) restored[message.id] = trace;
+        }
+        setTraces({ thread: threadId, map: restored });
+
+        // `trace` is stripped before the messages reach the agent. It is
+        // OUR field, added to the transcript payload for the accordion,
+        // and the agent validates what it is handed against the AG-UI
+        // Message shape — an unrecognised key there risks the whole
+        // restore being rejected, which surfaces as a conversation that
+        // opens completely empty.
+        agent.setMessages(
+          transcript.messages.map(({ trace: _trace, ...message }) => message),
+        );
+      } catch (error) {
+        // The conversation itself is intact in the checkpointer, so the
+        // agent still has context for the next turn even with an
+        // empty-looking pane — but an empty pane is exactly what a user
+        // reports as "my chat is gone", and swallowing this silently is
+        // what made that hard to diagnose. Cosmetic, not invisible.
+        console.error("[assistant] transcript restore failed", error);
       }
     })();
 
@@ -170,6 +330,11 @@ function useRestoredTranscript(threadId: string) {
       cancelled = true;
     };
   }, [agent, threadId]);
+
+  // Another conversation's traces are not shown while this one's are
+  // still in flight — the accordion would be attached to message ids
+  // that are not on screen.
+  return traces.thread === threadId ? traces.map : NO_TRACES.map;
 }
 
 /**
@@ -201,10 +366,11 @@ function useRefreshOnRunEnd() {
 }
 
 export function AssistantChat({ threadId }: { threadId: string }) {
-  useRestoredTranscript(threadId);
+  const replayedTraces = useRestoredTranscript(threadId);
   useRefreshOnRunEnd();
 
   return (
+    <ReplayedTraces.Provider value={replayedTraces}>
     <div className="flex h-full flex-col">
       <RunNavigationGuard />
       {/* wraps rather than overflowing: on a narrow phone the title, the
@@ -216,6 +382,7 @@ export function AssistantChat({ threadId }: { threadId: string }) {
           <WorkBudget />
         </div>
       </div>
+      <LiveReasoning />
       <div className="min-h-0 flex-1">
         <CopilotChat
           agentId={AGENT_ID}
@@ -241,14 +408,16 @@ export function AssistantChat({ threadId }: { threadId: string }) {
             addMenuButton: () => null,
             sendButton: { "aria-label": "Send message" },
           }}
-          // Same treatment for the per-message actions.
+          // Replaced wholesale rather than configured, so each replayed
+          // assistant turn can carry its own reasoning accordion. The
+          // stock component still does the rendering — see
+          // AssistantMessageWithTrace.
           messageView={{
-            assistantMessage: {
-              copyButton: { "aria-label": "Copy this reply" },
-            },
+            assistantMessage: AssistantMessageWithTrace,
           }}
         />
       </div>
     </div>
+    </ReplayedTraces.Provider>
   );
 }
