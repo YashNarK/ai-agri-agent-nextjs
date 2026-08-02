@@ -29,7 +29,14 @@ import {
   UseAgentUpdate,
 } from "@copilotkit/react-core/v2";
 import { useRouter } from "next/navigation";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import type { AgentUiState } from "@/agents/agui-agent";
 import { asRunTrace, type RunTrace } from "@/agents/trace";
@@ -200,6 +207,16 @@ const NO_TRACES: { thread: string; map: Record<string, RunTrace> } = {
 };
 
 /**
+ * How many times a restore will re-apply itself before giving up.
+ *
+ * CopilotKit clears the agent once per thread switch, so one retry is
+ * the expected case and this is headroom. The cap exists so that if the
+ * library ever clears unconditionally, the result is an empty pane
+ * rather than a set/clear loop pinning the tab.
+ */
+const MAX_RESTORE_ATTEMPTS = 5;
+
+/**
  * The stock assistant message with its run's accordion above it.
  *
  * Wrapping rather than reimplementing: everything CopilotKit renders —
@@ -237,9 +254,37 @@ function useRestoredTranscript(threadId: string) {
   // threadId parameter, so this is the same agent instance `<CopilotChat
   // threadId={…}>` runs against, and the thread only matters for which
   // transcript we fetch.
-  const { agent } = useAgent({ agentId: AGENT_ID });
-  // one restore attempt per thread, even under StrictMode's double effect
+  //
+  // Subscribed to message and run-status changes, because the restore
+  // below is not one-shot: it re-applies when the agent is emptied. See
+  // pendingRestore.
+  const { agent } = useAgent({
+    agentId: AGENT_ID,
+    updates: [UseAgentUpdate.OnMessagesChanged, UseAgentUpdate.OnRunStatusChanged],
+  });
+  // one FETCH per thread, even under StrictMode's double effect
   const restoredFor = useRef<string | null>(null);
+  /**
+   * The fetched transcript, held until the agent will keep it.
+   *
+   * Setting messages once, when the fetch resolves, does not survive:
+   * CopilotKit's own RunHandler.connectAgent treats a changed threadId
+   * as a fresh restore and calls `agent.setMessages([])` +
+   * `setState({})` to rebuild the thread from ITS gateway. This app has
+   * no such gateway — the transcript lives in our Postgres — so that
+   * clear simply erased whatever we had just restored, and every
+   * reopened conversation rendered empty.
+   *
+   * Rather than race it, the transcript is kept here and re-applied
+   * whenever the agent ends up empty for this thread. `attempts` caps
+   * the exchange so a genuine disagreement degrades to an empty pane
+   * instead of an endless set/clear loop.
+   */
+  const pendingRestore = useRef<{
+    thread: string;
+    messages: TranscriptResponse["messages"];
+    attempts: number;
+  } | null>(null);
   // Stamped with the thread they were fetched for, rather than cleared
   // on switch. Clearing would mean a setState in the effect body, which
   // triggers a cascading render; tagging lets the read below simply
@@ -248,6 +293,40 @@ function useRestoredTranscript(threadId: string) {
     thread: string;
     map: Record<string, RunTrace>;
   }>(NO_TRACES);
+
+  /**
+   * Hands the fetched transcript to the agent, if it still needs it.
+   *
+   * Idempotent and self-limiting: it does nothing while a run owns the
+   * pane, nothing once the messages are in place, and gives up after a
+   * few rounds rather than fighting indefinitely.
+   */
+  const applyPendingRestore = useCallback(() => {
+    const pending = pendingRestore.current;
+    if (!pending || pending.thread !== threadId) return;
+    // a live run owns the transcript; replacing it would drop the
+    // answer currently being written
+    if (agent.isRunning) return;
+    // already applied and still standing
+    if (agent.messages.length > 0) return;
+    if (pending.attempts >= MAX_RESTORE_ATTEMPTS) return;
+    pending.attempts += 1;
+
+    // `trace` is stripped before the messages reach the agent. It is
+    // OUR field, added to the transcript payload for the accordion, and
+    // the agent validates what it is handed against the AG-UI Message
+    // shape.
+    agent.setMessages(
+      pending.messages.map(({ trace: _trace, ...message }) => message),
+    );
+  }, [agent, threadId]);
+
+  // Re-applies after anything empties the agent — most importantly
+  // connectAgent's thread-switch clear, which runs asynchronously and
+  // usually lands AFTER the fetch resolves.
+  useEffect(() => {
+    applyPendingRestore();
+  }, [applyPendingRestore, agent.messages.length, agent.isRunning]);
 
   useEffect(() => {
     if (restoredFor.current === threadId) return;
@@ -258,6 +337,7 @@ function useRestoredTranscript(threadId: string) {
     const stale = agentThread !== null && agentThread !== threadId;
     agentThread = threadId;
     restoredFor.current = threadId;
+    pendingRestore.current = null;
 
     // Clear FIRST, synchronously. The transcript fetch below is async,
     // and until it resolves the pane would otherwise keep rendering the
@@ -285,21 +365,18 @@ function useRestoredTranscript(threadId: string) {
         const transcript = (await response.json()) as TranscriptResponse;
         if (cancelled) return;
         if (transcript.messages.length === 0) return;
-        // A run that started while the fetch was in flight owns the pane
-        // — replacing its messages would drop the answer mid-write.
-        if (agent.isRunning) return;
         // Only defer to the in-memory transcript when it belongs to THIS
-        // conversation, where it is genuinely the fresher copy. When it
-        // belongs to another one it is not fresher, it is wrong, and the
-        // old guard's `messages.length > 0` could not tell the two apart
-        // — so switching conversations silently kept showing the one you
-        // had just left.
+        // conversation, where it is genuinely the fresher copy — it
+        // holds the turn currently streaming, which the database does
+        // not have until the run finishes. When it belongs to another
+        // conversation it is not fresher, it is wrong, and the old
+        // guard's `messages.length > 0` could not tell the two apart.
         if (!stale && agent.messages.length > 0) return;
 
-        // Traces are lifted out BEFORE setMessages: the agent's Message
-        // type has no room for them, so anything not extracted here is
-        // dropped on the way in and the replayed turns lose their
-        // accordions again.
+        // Traces are lifted out BEFORE the messages reach the agent: the
+        // agent's Message type has no room for them, so anything not
+        // extracted here is dropped on the way in and the replayed turns
+        // lose their accordions.
         const restored: Record<string, RunTrace> = {};
         for (const message of transcript.messages) {
           const trace = asRunTrace(message.trace);
@@ -307,15 +384,12 @@ function useRestoredTranscript(threadId: string) {
         }
         setTraces({ thread: threadId, map: restored });
 
-        // `trace` is stripped before the messages reach the agent. It is
-        // OUR field, added to the transcript payload for the accordion,
-        // and the agent validates what it is handed against the AG-UI
-        // Message shape — an unrecognised key there risks the whole
-        // restore being rejected, which surfaces as a conversation that
-        // opens completely empty.
-        agent.setMessages(
-          transcript.messages.map(({ trace: _trace, ...message }) => message),
-        );
+        pendingRestore.current = {
+          thread: threadId,
+          messages: transcript.messages,
+          attempts: 0,
+        };
+        applyPendingRestore();
       } catch (error) {
         // The conversation itself is intact in the checkpointer, so the
         // agent still has context for the next turn even with an
@@ -329,7 +403,10 @@ function useRestoredTranscript(threadId: string) {
     return () => {
       cancelled = true;
     };
-  }, [agent, threadId]);
+    // applyPendingRestore closes over exactly [agent, threadId] too, so
+    // listing it cannot re-run this effect more often than it already
+    // would — and the `restoredFor` guard makes a re-run a no-op anyway.
+  }, [agent, threadId, applyPendingRestore]);
 
   // Another conversation's traces are not shown while this one's are
   // still in flight — the accordion would be attached to message ids
