@@ -152,12 +152,16 @@ export function ReasoningAccordion({
     .join(" · ");
 
   return (
-    <div className="my-2 rounded-lg border bg-muted/30">
+    // min-h-0 so this can be a flex child that SHRINKS. Without it a
+    // flex item refuses to go below its content height, which is what
+    // pushed the expanded list past the pane and out of reach.
+    <div className="my-2 flex min-h-0 flex-col rounded-lg border bg-muted/30">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
+        // shrink-0 keeps the header visible while the list below scrolls
+        className="flex w-full shrink-0 items-center gap-2 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
       >
         <span
           aria-hidden
@@ -175,7 +179,13 @@ export function ReasoningAccordion({
       </button>
 
       {open && (
-        <ol className="space-y-3 px-3 pt-1 pb-3">
+        // The list owns its own scrolling. It sits inside a fixed-height
+        // pane whose ancestor is overflow-hidden, so an unbounded list
+        // is simply clipped — the steps beyond the fold cannot be
+        // reached by scrolling anything, which is exactly how this
+        // failed. Capped in vh rather than px so a long trace stays
+        // usable on a laptop and a phone alike.
+        <ol className="max-h-[45vh] min-h-0 space-y-3 overflow-y-auto overscroll-contain px-3 pt-1 pb-3">
           {steps.map((step) => (
             <StepRow key={step.index} step={step} />
           ))}

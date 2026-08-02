@@ -71,11 +71,11 @@ function LiveReasoning() {
   if (steps.length === 0) return null;
 
   return (
-    <div className="border-b px-4 py-1">
-      <ReasoningAccordion
-        trace={{ steps }}
-        running={agent.isRunning}
-      />
+    // flex + min-h-0 so the accordion inside can bound and scroll itself
+    // rather than growing the column past the pane; shrink-0 on the
+    // wrapper keeps it from being squeezed to nothing by the chat below.
+    <div className="flex min-h-0 shrink-0 flex-col border-b px-4 py-1">
+      <ReasoningAccordion trace={{ steps }} running={agent.isRunning} />
     </div>
   );
 }
