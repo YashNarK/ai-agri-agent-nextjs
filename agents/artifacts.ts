@@ -76,6 +76,16 @@ export interface ForecastArtifact {
    */
   confidence_low: number | null;
   confidence_high: number | null;
+  /**
+   * Last date this pair has an ACTUAL observed price, and how many
+   * monthly steps the forecast was rolled past it.
+   *
+   * Rendered as a badge rather than kept for debugging: a 24-month
+   * extrapolation and a one-month-ahead forecast look identical on a
+   * chart, and only one of them should be acted on.
+   */
+  last_history_date: string;
+  months_extrapolated: number;
 }
 
 export interface KnowledgeArtifact {

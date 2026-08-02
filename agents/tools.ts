@@ -313,9 +313,9 @@ export function buildAgentTools(container: Container, config: AppConfig) {
         return [`Region '${region_code}' not found.`, null];
       }
 
-      let features;
+      let plan;
       try {
-        features = await predictionsService.buildFeatureRow(
+        plan = await predictionsService.buildForecastPlan(
           crop_code,
           region_code,
           crop.id,
@@ -326,17 +326,17 @@ export function buildAgentTools(container: Container, config: AppConfig) {
         const detail = error instanceof Error ? error.message : String(error);
         return [
           `NO FORECAST AVAILABLE for ${crop_code} @ ${region_code}: ` +
-            `${detail}. This pair has no price history to base a prediction ` +
-            `on. Do NOT fabricate a value — tell the user this crop/region ` +
-            `cannot be forecast and call list_available_crops to see which ` +
-            `pairs can.`,
+            `${detail} Do NOT fabricate a value and do NOT substitute a ` +
+            `nearer date's forecast — tell the user plainly that this target ` +
+            `date cannot be forecast, and say why.`,
           null,
         ];
       }
 
       let prediction;
       try {
-        prediction = await predictionsService.scoreFeatures(features, config);
+        const path = await predictionsService.scoreForecastPath(plan, config);
+        prediction = path[path.length - 1];
       } catch (error) {
         const detail =
           error instanceof ApiError
@@ -353,12 +353,38 @@ export function buildAgentTools(container: Container, config: AppConfig) {
       }
 
       const { predictedPrice, confidenceLow, confidenceHigh } = prediction;
+      const { last_history_date, months_extrapolated, history_months, method } =
+        plan.provenance;
+
+      // The horizon goes in the PROSE, not just the artifact, because the
+      // prose is what the model reads. Without it, three forecasts past
+      // the end of history look like three independent readings, and the
+      // model narrates the resemblance between them as a market trend
+      // rather than as the artefact of extrapolation it is.
+      const horizonLine =
+        months_extrapolated === 0
+          ? `  Horizon         : within recorded history (last actual price ${last_history_date})`
+          : `  Horizon         : ${months_extrapolated} month(s) BEYOND the last actual ` +
+            `price (${last_history_date}), reached by rolling the model forward ` +
+            `one month at a time`;
+
+      const caveat =
+        months_extrapolated >= 6
+          ? `\nEXTRAPOLATION WARNING: this is ${months_extrapolated} months past the ` +
+            `last observed price. Each step feeds the previous step's output back in, ` +
+            `so confidence degrades with distance. State the horizon when you report ` +
+            `this number, and do NOT describe it as a market trend, an equilibrium, ` +
+            `or a stable price — it is one projection with compounding uncertainty.`
+          : "";
 
       const prose =
         `Price prediction for ${crop.name} in ${region.name} on ${target_date}:\n` +
         `  Predicted price : $${money(predictedPrice)}/tonne\n` +
         `  Confidence low  : $${money(confidenceLow ?? predictedPrice)}/tonne\n` +
-        `  Confidence high : $${money(confidenceHigh ?? predictedPrice)}/tonne`;
+        `  Confidence high : $${money(confidenceHigh ?? predictedPrice)}/tonne\n` +
+        horizonLine +
+        `\n  Based on        : ${history_months} months of recorded history (${method} scoring)` +
+        caveat;
 
       const artifact: ForecastArtifact = {
         kind: "forecast",
@@ -373,6 +399,8 @@ export function buildAgentTools(container: Container, config: AppConfig) {
         // certainty the model never reported
         confidence_low: confidenceLow ?? null,
         confidence_high: confidenceHigh ?? null,
+        last_history_date,
+        months_extrapolated,
       };
 
       return [prose, artifact];

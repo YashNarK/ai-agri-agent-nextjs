@@ -255,6 +255,21 @@ export const predictionListQuerySchema = z.object({
   q: z.string().trim().max(100).optional(),
 });
 
+/**
+ * Where a forecast's inputs came from, and how far past them it reached.
+ *
+ * Travels with every forecast because the number alone is not
+ * interpretable: a price for 2029 built from history ending in 2026 is a
+ * projection rolled forward 38 times, not a reading, and a caller that
+ * cannot see the horizon will present it as the latter.
+ */
+export interface ForecastProvenanceSchema {
+  last_history_date: string;
+  history_months: number;
+  months_extrapolated: number;
+  method: "direct" | "recursive";
+}
+
 export interface PredictionResponse {
   id: number;
   crop_id: number;
@@ -265,6 +280,7 @@ export interface PredictionResponse {
   confidence_high: number | null;
   model_version: string | null;
   prediction_date: string;
+  provenance?: ForecastProvenanceSchema;
 }
 
 // ============================================================

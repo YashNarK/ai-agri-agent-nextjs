@@ -64,6 +64,29 @@ export class PriceRepository {
   }
 
   /**
+   * How much history one pair has, and when it ends.
+   *
+   * A forecast's honesty depends on this: every target date past
+   * `last` is extrapolation, and the caller has to be able to say so
+   * rather than present a rolled-forward guess as a reading. One
+   * aggregate rather than pulling rows, since only the bounds matter.
+   */
+  async historyBounds(cropId: number, regionId: number) {
+    const prisma = await getPrisma();
+    const result = await prisma.crop_price_history.aggregate({
+      where: { crop_id: cropId, region_id: regionId },
+      _count: { _all: true },
+      _min: { price_date: true },
+      _max: { price_date: true },
+    });
+    return {
+      months: result._count._all,
+      first: result._min.price_date,
+      last: result._max.price_date,
+    };
+  }
+
+  /**
    * The exact (crop, region) pairs that actually have price history,
    * with row counts and date coverage. This is the single source of
    * truth the agent and MCP server use to avoid fabricating codes.

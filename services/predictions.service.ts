@@ -47,6 +47,57 @@ const MACRO_FALLBACKS: Record<string, number> = {
 
 export type FeatureRow = Record<string, string | number>;
 
+/**
+ * How far past the end of price history a forecast may be rolled.
+ *
+ * Each recursive step feeds the previous step's prediction back in as a
+ * lag, so error compounds: by two years out the model is mostly reading
+ * its own output. Refusing beyond this is the same principle as
+ * refusing a pair with no history at all — better no number than a
+ * confident one nobody should act on.
+ */
+export const MAX_FORECAST_HORIZON_MONTHS = 24;
+
+/**
+ * Where a forecast's inputs came from, and how far it reached.
+ *
+ * Carried alongside every prediction because the number alone is not
+ * interpretable: $639 for 2027 built from prices ending July 2026 is a
+ * 38-month extrapolation, and a reader who cannot see that will treat
+ * it as a reading rather than a projection.
+ */
+export interface ForecastProvenance {
+  /** Last actual observed price date for the pair, YYYY-MM-DD. */
+  last_history_date: string;
+  /** Months of recorded history behind the forecast. */
+  history_months: number;
+  /** Monthly steps rolled forward past `last_history_date`; 0 = in-sample. */
+  months_extrapolated: number;
+  /** `recursive` rolled predictions forward; `direct` scored once. */
+  method: "direct" | "recursive";
+}
+
+export interface ForecastPlan {
+  /** Oldest-first, one row per monthly step. The last row is the target. */
+  steps: FeatureRow[];
+  provenance: ForecastProvenance;
+}
+
+/** Whole months from `from` to `to`, ignoring day-of-month. */
+function monthsBetween(from: Date, to: Date): number {
+  return (
+    (to.getUTCFullYear() - from.getUTCFullYear()) * 12 +
+    (to.getUTCMonth() - from.getUTCMonth())
+  );
+}
+
+/** `base` advanced by `count` months, normalised to the first of the month. */
+function addMonths(base: Date, count: number): Date {
+  return new Date(
+    Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + count, 1),
+  );
+}
+
 /** A persisted forecast row, with its crop and region, as the API shape. */
 type PredictionRow = NonNullable<
   Awaited<ReturnType<PredictionRepository["findById"]>>
@@ -219,6 +270,48 @@ export class PredictionsService {
   }
 
   /**
+   * A resolver for "latest macro value on/before date", backed by one
+   * query instead of one per step.
+   *
+   * A 24-step roll-forward needs macros at 24 different dates. Asking
+   * findLatestValue for each would be 96 round trips to answer from a
+   * few hundred rows, so the series is pulled once and walked in memory.
+   */
+  private async macroResolver(
+    upTo: Date,
+  ): Promise<(at: Date) => Record<string, number>> {
+    const rows = await this.marketIndicatorRepo.findSeries({
+      names: [...MACRO_INDICATORS],
+      dateTo: upTo,
+    });
+
+    // ascending per name, so the last entry at or before a date wins
+    const byName = new Map<string, { date: Date; value: number }[]>();
+    for (const row of rows) {
+      const list = byName.get(row.indicator_name) ?? [];
+      list.push({
+        date: row.indicator_date,
+        value: toNumber(row.indicator_value),
+      });
+      byName.set(row.indicator_name, list);
+    }
+
+    return (at: Date) => {
+      const macros: Record<string, number> = {};
+      for (const name of MACRO_INDICATORS) {
+        const series = byName.get(name) ?? [];
+        let value: number | undefined;
+        for (const point of series) {
+          if (point.date.getTime() <= at.getTime()) value = point.value;
+          else break;
+        }
+        macros[name] = value ?? MACRO_FALLBACKS[name];
+      }
+      return macros;
+    };
+  }
+
+  /**
    * Builds the exact feature row the model was trained on:
    * three price lags, a 3-period rolling mean, cyclic month encoding,
    * last traded volume, and the macro indicators.
@@ -257,9 +350,35 @@ export class PredictionsService {
     const lastVolume = toNumberOrNull(history[0].volume_traded) ?? 0.0;
     const macros = await this.latestMacros(targetDate);
 
+    return this.assembleRow({
+      cropCode,
+      regionCode,
+      at: targetDate,
+      lags: [prices[0], prices[1], prices[2]],
+      lastVolume,
+      macros,
+    });
+  }
+
+  /** The 15-column row, assembled in the order the model was fitted on. */
+  private assembleRow({
+    cropCode,
+    regionCode,
+    at,
+    lags,
+    lastVolume,
+    macros,
+  }: {
+    cropCode: string;
+    regionCode: string;
+    at: Date;
+    lags: [number, number, number];
+    lastVolume: number;
+    macros: Record<string, number>;
+  }): FeatureRow {
     // getUTC* because price_date is a timezone-free Postgres `date`
-    const year = targetDate.getUTCFullYear();
-    const month = targetDate.getUTCMonth() + 1;
+    const year = at.getUTCFullYear();
+    const month = at.getUTCMonth() + 1;
 
     return {
       crop_code: cropCode,
@@ -268,12 +387,117 @@ export class PredictionsService {
       month,
       month_sin: Math.sin((2 * Math.PI * month) / 12.0),
       month_cos: Math.cos((2 * Math.PI * month) / 12.0),
-      lag_1: prices[0],
-      lag_2: prices[1],
-      lag_3: prices[2],
-      roll_mean_3: (prices[0] + prices[1] + prices[2]) / 3.0,
+      lag_1: lags[0],
+      lag_2: lags[1],
+      lag_3: lags[2],
+      roll_mean_3: (lags[0] + lags[1] + lags[2]) / 3.0,
       last_volume: lastVolume,
       ...macros,
+    };
+  }
+
+  /**
+   * Plans a forecast: the monthly steps to score, and the provenance
+   * needed to describe the result honestly.
+   *
+   * A target within (or one month past) the history end is a single
+   * direct score — that is exactly what the model was trained to do.
+   * Further out it becomes a roll-forward, one row per month, because
+   * scoring a distant date against unchanged lags does not extrapolate:
+   * every future row would be identical except `year`, and the tree
+   * ensemble returns the same number for every year past its training
+   * range.
+   *
+   * Throws 422 when the pair has no history at all, and again when the
+   * horizon exceeds what a compounding roll-forward can honestly carry.
+   */
+  async buildForecastPlan(
+    cropCode: string,
+    regionCode: string,
+    cropId: number,
+    regionId: number,
+    targetDate: Date,
+  ): Promise<ForecastPlan> {
+    const [history, bounds] = await Promise.all([
+      this.priceRepo.findRecentBefore(cropId, regionId, targetDate, 3),
+      this.priceRepo.historyBounds(cropId, regionId),
+    ]);
+
+    if (history.length === 0 || !bounds.last) {
+      throw unprocessable(
+        `No price history for ${cropCode}/${regionCode} before ` +
+          `${toDateString(targetDate)}; cannot build prediction features`,
+      );
+    }
+
+    const prices = history.map((row) => toNumber(row.price_usd_tonne));
+    while (prices.length < 3) prices.push(prices[prices.length - 1]);
+    const lags: [number, number, number] = [prices[0], prices[1], prices[2]];
+    const lastVolume = toNumberOrNull(history[0].volume_traded) ?? 0.0;
+
+    // measured from the last observation the lags actually came from,
+    // not from the pair's overall max — for a target inside the series
+    // those differ, and only the former bounds the roll-forward
+    const anchor = history[0].price_date;
+    const horizon = monthsBetween(anchor, targetDate);
+
+    if (horizon > MAX_FORECAST_HORIZON_MONTHS) {
+      throw unprocessable(
+        `${cropCode}/${regionCode} price history ends ${toDateString(bounds.last)}, ` +
+          `so ${toDateString(targetDate)} is ${horizon} months beyond it. This model ` +
+          `forecasts one month ahead and is rolled forward step by step, which ` +
+          `compounds error — it will not forecast further than ` +
+          `${MAX_FORECAST_HORIZON_MONTHS} months past the last observed price. ` +
+          `Pick a nearer target date.`,
+      );
+    }
+
+    const provenanceBase = {
+      last_history_date: toDateString(bounds.last),
+      history_months: bounds.months,
+      months_extrapolated: Math.max(0, horizon),
+    };
+
+    // One step ahead (or inside the series) is the model's native
+    // question — no roll-forward needed, and none should be invented.
+    if (horizon <= 1) {
+      const macros = await this.latestMacros(targetDate);
+      return {
+        steps: [
+          this.assembleRow({
+            cropCode,
+            regionCode,
+            at: targetDate,
+            lags,
+            lastVolume,
+            macros,
+          }),
+        ],
+        provenance: { ...provenanceBase, method: "direct" },
+      };
+    }
+
+    const macrosAt = await this.macroResolver(targetDate);
+    const steps: FeatureRow[] = [];
+    for (let step = 1; step <= horizon; step++) {
+      const at = addMonths(anchor, step);
+      steps.push(
+        this.assembleRow({
+          cropCode,
+          regionCode,
+          at,
+          // only the first row's lags are honoured; the Lambda overwrites
+          // the rest as it rolls each prediction forward
+          lags,
+          lastVolume,
+          macros: macrosAt(at),
+        }),
+      );
+    }
+
+    return {
+      steps,
+      provenance: { ...provenanceBase, method: "recursive" },
     };
   }
 
@@ -337,6 +561,72 @@ export class PredictionsService {
   }
 
   /**
+   * Scores a whole forecast plan in ONE invocation and returns the path.
+   *
+   * The roll-forward runs inside the Lambda rather than here. Each step
+   * depends on the previous step's output, so it cannot be batched or
+   * parallelised — done from this process it would be one HTTPS
+   * round-trip per month (~170ms each, so ~4s for two years). In-process
+   * the same steps are microseconds apart, and the whole path costs a
+   * single invocation.
+   *
+   * Returns every step, not just the last: the intermediate months are
+   * the forecast trajectory, which is worth showing and worth logging.
+   */
+  async scoreForecastPath(
+    plan: ForecastPlan,
+    config: AppConfig,
+  ): Promise<ParsedPrediction[]> {
+    const payload = {
+      recursive: plan.provenance.method === "recursive",
+      input_data: {
+        columns: FEATURE_COLUMNS,
+        data: plan.steps.map((step) => FEATURE_COLUMNS.map((col) => step[col])),
+      },
+    };
+
+    let response: InvokeCommandOutput;
+    try {
+      response = await lambdaClient().send(
+        new InvokeCommand({
+          FunctionName: config.model.functionName,
+          InvocationType: "RequestResponse",
+          Payload: JSON.stringify(payload),
+        }),
+      );
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw badGateway(`Price model error: ${detail}`);
+    }
+
+    const raw = response.Payload
+      ? Buffer.from(response.Payload).toString("utf-8")
+      : "";
+
+    if (response.FunctionError) {
+      throw badGateway(`Price model error: ${response.FunctionError} ${raw}`.trim());
+    }
+
+    let records: unknown[];
+    try {
+      const body = JSON.parse(raw) as { predictions?: unknown };
+      records = Array.isArray(body.predictions) ? body.predictions : [];
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw badGateway(`Price model error: ${detail}`);
+    }
+
+    if (records.length !== plan.steps.length) {
+      throw badGateway(
+        `Price model error: asked for ${plan.steps.length} step(s), got ` +
+          `${records.length}`,
+      );
+    }
+
+    return records.map((record) => parsePrediction(record));
+  }
+
+  /**
    * Full prediction flow: resolve codes → build features → score →
    * log the forecast to price_predictions for audit → return it.
    */
@@ -349,7 +639,7 @@ export class PredictionsService {
     const crop = await this.cropsService.requireCropByCode(cropCode);
     const region = await this.regionsService.requireRegionByCode(regionCode);
 
-    const features = await this.buildFeatureRow(
+    const plan = await this.buildForecastPlan(
       cropCode,
       regionCode,
       crop.id,
@@ -357,8 +647,9 @@ export class PredictionsService {
       targetDate,
     );
 
-    const { predictedPrice, confidenceLow, confidenceHigh } =
-      await this.scoreFeatures(features, config);
+    const path = await this.scoreForecastPath(plan, config);
+    // the target is the last step; the earlier ones are the trajectory
+    const { predictedPrice, confidenceLow, confidenceHigh } = path[path.length - 1];
 
     const saved = await this.predictionRepo.create({
       cropId: crop.id,
@@ -368,7 +659,13 @@ export class PredictionsService {
       confidenceLow,
       confidenceHigh,
       modelVersion: config.model.modelName,
-      featuresUsed: features,
+      // the row that produced the answer, plus how it was reached — a
+      // stored feature row without the horizon is not enough to explain
+      // a 24-month roll-forward after the fact
+      featuresUsed: {
+        ...plan.steps[plan.steps.length - 1],
+        ...plan.provenance,
+      },
     });
 
     return {
@@ -381,6 +678,7 @@ export class PredictionsService {
       confidence_high: toNumberOrNull(saved.confidence_high),
       model_version: saved.model_version,
       prediction_date: saved.prediction_date.toISOString(),
+      provenance: plan.provenance,
     };
   }
 }
